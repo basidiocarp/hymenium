@@ -178,16 +178,16 @@ fn decide_progressive_recovery(
 ) -> RecoveryAction {
     if retry_count >= policy.max_retries {
         return RecoveryAction::Escalate {
-            reason: format!(
-                "{context} after {retry_count} retries — retry limit exceeded"
-            ),
+            reason: format!("{context} after {retry_count} retries — retry limit exceeded"),
         };
     }
 
-    if retry_count == 0 { RecoveryAction::Retry {
-        narrowed_scope: None,
-        new_tier: None,
-    } } else {
+    if retry_count == 0 {
+        RecoveryAction::Retry {
+            narrowed_scope: None,
+            new_tier: None,
+        }
+    } else {
         let narrowed = if policy.narrow_scope_on_retry {
             Some("narrow".to_string())
         } else {
@@ -254,7 +254,10 @@ mod tests {
 
         match action {
             RecoveryAction::Retry { narrowed_scope, .. } => {
-                assert!(narrowed_scope.is_some(), "expected narrowed scope on second retry");
+                assert!(
+                    narrowed_scope.is_some(),
+                    "expected narrowed scope on second retry"
+                );
             }
             other => panic!("expected Retry, got {other:?}"),
         }
@@ -361,7 +364,13 @@ mod tests {
 
         // First: plain retry
         let action = decide_recovery(&signal, 0, &policy);
-        assert!(matches!(action, RecoveryAction::Retry { narrowed_scope: None, .. }));
+        assert!(matches!(
+            action,
+            RecoveryAction::Retry {
+                narrowed_scope: None,
+                ..
+            }
+        ));
 
         // Second: narrowed scope
         let action = decide_recovery(&signal, 1, &policy);
@@ -444,10 +453,10 @@ mod tests {
 
     #[test]
     fn status_chatter_via_handle_signal_returns_retry() {
+        use crate::workflow::engine::PhaseStatus;
         use crate::workflow::engine::WorkflowInstance;
         use crate::workflow::template::impl_audit_default;
         use crate::workflow::WorkflowId;
-        use crate::workflow::engine::PhaseStatus;
 
         let template = impl_audit_default();
         let mut wf = WorkflowInstance::new(
@@ -465,11 +474,14 @@ mod tests {
         };
         let policy = RetryPolicy::default();
 
-        let action = crate::monitor::handle_signal(&signal, &mut wf, 0, &policy)
-            .expect("should succeed");
+        let action =
+            crate::monitor::handle_signal(&signal, &mut wf, 0, &policy).expect("should succeed");
         match action {
             RecoveryAction::Retry { narrowed_scope, .. } => {
-                assert!(narrowed_scope.is_some(), "StatusChatterOnly should narrow scope");
+                assert!(
+                    narrowed_scope.is_some(),
+                    "StatusChatterOnly should narrow scope"
+                );
             }
             other => panic!("expected Retry, got {other:?}"),
         }

@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use thiserror::Error;
 
-pub mod progress;
 pub mod handler;
+pub mod progress;
 
-pub use progress::{check_progress, is_stalled};
 pub use handler::handle_signal;
+pub use progress::{check_progress, is_stalled};
 
 // ---------------------------------------------------------------------------
 // Error

@@ -17,11 +17,7 @@ pub(super) fn group_by_project(
 
     let mut groups: BTreeMap<String, Vec<&ParsedStep>> = BTreeMap::new();
     for step in steps {
-        let key = step
-            .project
-            .as_deref()
-            .unwrap_or("default")
-            .to_string();
+        let key = step.project.as_deref().unwrap_or("default").to_string();
         groups.entry(key).or_default().push(step);
     }
     groups.into_iter().collect()
@@ -141,9 +137,7 @@ pub(super) fn pack_chunks<'a>(
         let mut current_count: usize = 0;
 
         for chunk in chunks {
-            if !current.is_empty()
-                && current_count + chunk.len() > config.max_steps_per_piece
-            {
+            if !current.is_empty() && current_count + chunk.len() > config.max_steps_per_piece {
                 pieces.push(std::mem::take(&mut current));
                 current_count = 0;
             }
@@ -195,7 +189,11 @@ pub(super) fn total_effort_secs(steps: &[&ParsedStep], warnings: &mut Vec<String
         }
     }
 
-    if any_parsed { Some(total) } else { None }
+    if any_parsed {
+        Some(total)
+    } else {
+        None
+    }
 }
 
 /// Generate a human-readable title for a set of steps.

@@ -17,7 +17,10 @@ pub enum TemplateError {
     MissingField(String),
 
     #[error("transition references non-existent phase: from {from_phase} to {to_phase}")]
-    InvalidPhaseReference { from_phase: String, to_phase: String },
+    InvalidPhaseReference {
+        from_phase: String,
+        to_phase: String,
+    },
 
     #[error("duplicate phase ID: {0}")]
     DuplicatePhaseId(String),
@@ -159,7 +162,8 @@ impl TemplateRegistry {
     /// Register a template in the registry.
     pub fn register(&mut self, template: WorkflowTemplate) -> TemplateResult<()> {
         template.validate()?;
-        self.templates.insert(template.template_id.clone(), template);
+        self.templates
+            .insert(template.template_id.clone(), template);
         Ok(())
     }
 
@@ -172,7 +176,10 @@ impl TemplateRegistry {
 
     /// List all registered template IDs.
     pub fn list_ids(&self) -> Vec<&str> {
-        self.templates.keys().map(std::string::String::as_str).collect()
+        self.templates
+            .keys()
+            .map(std::string::String::as_str)
+            .collect()
     }
 }
 
@@ -184,8 +191,8 @@ impl Default for TemplateRegistry {
 
 /// Load a workflow template from JSON.
 pub fn load_from_json(json: &str) -> TemplateResult<WorkflowTemplate> {
-    let template: WorkflowTemplate = serde_json::from_str(json)
-        .map_err(|e| TemplateError::ParseError(e.to_string()))?;
+    let template: WorkflowTemplate =
+        serde_json::from_str(json).map_err(|e| TemplateError::ParseError(e.to_string()))?;
     template.validate()?;
     Ok(template)
 }
@@ -286,7 +293,9 @@ mod tests {
         let template = impl_audit_default();
         assert_eq!(template.template_id, "impl-audit");
         assert_eq!(template.phases.len(), 2);
-        template.validate().expect("default template should be valid");
+        template
+            .validate()
+            .expect("default template should be valid");
     }
 
     #[test]

@@ -183,11 +183,7 @@ impl GateEvaluator for MockGateEvaluator {
         _context: &GateContext,
     ) -> GateResult<ConditionEvaluation> {
         let condition_str = condition.to_string();
-        let passed = self
-            .passing
-            .get(&condition_str)
-            .copied()
-            .unwrap_or(false);
+        let passed = self.passing.get(&condition_str).copied().unwrap_or(false);
 
         Ok(ConditionEvaluation {
             condition: condition.clone(),
@@ -265,8 +261,14 @@ mod tests {
         let context = GateContext::new(wf_id, "phase1")
             .with_metadata("key1", "value1")
             .with_metadata("key2", "value2");
-        assert_eq!(context.metadata.get("key1").map(|s| s.as_str()), Some("value1"));
-        assert_eq!(context.metadata.get("key2").map(|s| s.as_str()), Some("value2"));
+        assert_eq!(
+            context.metadata.get("key1").map(|s| s.as_str()),
+            Some("value1")
+        );
+        assert_eq!(
+            context.metadata.get("key2").map(|s| s.as_str()),
+            Some("value2")
+        );
     }
 
     #[test]

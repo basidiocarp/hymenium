@@ -19,10 +19,7 @@ pub fn check_progress(
         .phase_states
         .get(workflow.current_phase_idx)
         .ok_or_else(|| {
-            MonitorError::InvalidState(format!(
-                "no phase at index {}",
-                workflow.current_phase_idx
-            ))
+            MonitorError::InvalidState(format!("no phase at index {}", workflow.current_phase_idx))
         })?;
 
     if phase.status != PhaseStatus::Active {
@@ -33,10 +30,7 @@ pub fn check_progress(
     }
 
     let task_id = phase.canopy_task_id.as_deref().ok_or_else(|| {
-        MonitorError::InvalidState(format!(
-            "phase {} has no canopy_task_id",
-            phase.phase_id
-        ))
+        MonitorError::InvalidState(format!("phase {} has no canopy_task_id", phase.phase_id))
     })?;
 
     let task = canopy
@@ -67,8 +61,8 @@ pub fn check_progress(
         ))
     })?;
     let elapsed = now.signed_duration_since(started);
-    let heartbeat_elapsed =
-        elapsed > chrono::Duration::from_std(config.heartbeat_timeout).unwrap_or(chrono::Duration::MAX);
+    let heartbeat_elapsed = elapsed
+        > chrono::Duration::from_std(config.heartbeat_timeout).unwrap_or(chrono::Duration::MAX);
 
     if heartbeat_elapsed && (task.status == "pending" || task.status == "assigned") {
         return Ok(ProgressSignal::Stalled {
@@ -89,8 +83,8 @@ pub fn check_progress(
         });
     }
 
-    let progress_elapsed =
-        elapsed > chrono::Duration::from_std(config.progress_timeout).unwrap_or(chrono::Duration::MAX);
+    let progress_elapsed = elapsed
+        > chrono::Duration::from_std(config.progress_timeout).unwrap_or(chrono::Duration::MAX);
 
     if progress_elapsed && completeness.completed_items == 0 {
         return Ok(ProgressSignal::Stalled {
@@ -143,8 +137,7 @@ mod tests {
         let canopy = TestCanopyClient::new(task_with_status("completed"), incomplete_report(0, 3));
         let config = MonitorConfig::default();
 
-        let signal = check_progress(&wf, &canopy, &config, Utc::now())
-            .expect("should succeed");
+        let signal = check_progress(&wf, &canopy, &config, Utc::now()).expect("should succeed");
         assert!(matches!(signal, ProgressSignal::PhaseComplete { .. }));
     }
 
@@ -154,8 +147,7 @@ mod tests {
         let canopy = TestCanopyClient::new(task_with_status("failed"), incomplete_report(0, 3));
         let config = MonitorConfig::default();
 
-        let signal = check_progress(&wf, &canopy, &config, Utc::now())
-            .expect("should succeed");
+        let signal = check_progress(&wf, &canopy, &config, Utc::now()).expect("should succeed");
         assert!(matches!(signal, ProgressSignal::Failed { .. }));
     }
 
@@ -168,8 +160,7 @@ mod tests {
         let canopy = TestCanopyClient::new(task_with_status("pending"), incomplete_report(0, 3));
         let config = MonitorConfig::default();
 
-        let signal = check_progress(&wf, &canopy, &config, Utc::now())
-            .expect("should succeed");
+        let signal = check_progress(&wf, &canopy, &config, Utc::now()).expect("should succeed");
         match signal {
             ProgressSignal::Stalled { reason, .. } => {
                 assert!(matches!(reason, StallReason::HeartbeatTimeout));
@@ -184,11 +175,11 @@ mod tests {
         wf.phase_states[0].started_at = Some(Utc::now() - chrono::Duration::hours(1));
 
         // Task is in_progress (not pending/assigned), so heartbeat check passes.
-        let canopy = TestCanopyClient::new(task_with_status("in_progress"), incomplete_report(0, 3));
+        let canopy =
+            TestCanopyClient::new(task_with_status("in_progress"), incomplete_report(0, 3));
         let config = MonitorConfig::default();
 
-        let signal = check_progress(&wf, &canopy, &config, Utc::now())
-            .expect("should succeed");
+        let signal = check_progress(&wf, &canopy, &config, Utc::now()).expect("should succeed");
         match signal {
             ProgressSignal::Stalled { reason, .. } => {
                 assert!(matches!(reason, StallReason::NoCodeDiff));
@@ -202,11 +193,11 @@ mod tests {
         let mut wf = make_workflow();
         wf.phase_states[0].started_at = Some(Utc::now() - chrono::Duration::hours(1));
 
-        let canopy = TestCanopyClient::new(task_with_status("in_progress"), incomplete_report(1, 3));
+        let canopy =
+            TestCanopyClient::new(task_with_status("in_progress"), incomplete_report(1, 3));
         let config = MonitorConfig::default();
 
-        let signal = check_progress(&wf, &canopy, &config, Utc::now())
-            .expect("should succeed");
+        let signal = check_progress(&wf, &canopy, &config, Utc::now()).expect("should succeed");
         match signal {
             ProgressSignal::Stalled { reason, .. } => {
                 assert!(matches!(reason, StallReason::NoPasteMarkerProgress));
@@ -218,11 +209,11 @@ mod tests {
     #[test]
     fn recent_in_progress_task_yields_healthy() {
         let wf = make_workflow();
-        let canopy = TestCanopyClient::new(task_with_status("in_progress"), incomplete_report(1, 3));
+        let canopy =
+            TestCanopyClient::new(task_with_status("in_progress"), incomplete_report(1, 3));
         let config = MonitorConfig::default();
 
-        let signal = check_progress(&wf, &canopy, &config, Utc::now())
-            .expect("should succeed");
+        let signal = check_progress(&wf, &canopy, &config, Utc::now()).expect("should succeed");
         assert!(matches!(signal, ProgressSignal::Healthy { .. }));
     }
 
@@ -232,8 +223,7 @@ mod tests {
         let canopy = TestCanopyClient::new(task_with_status("in_progress"), complete_report());
         let config = MonitorConfig::default();
 
-        let signal = check_progress(&wf, &canopy, &config, Utc::now())
-            .expect("should succeed");
+        let signal = check_progress(&wf, &canopy, &config, Utc::now()).expect("should succeed");
         assert!(matches!(signal, ProgressSignal::PhaseComplete { .. }));
     }
 
@@ -293,7 +283,8 @@ mod tests {
         wf.phase_states[0].canopy_task_id = Some("task-1".to_string());
         // started_at intentionally left as None
 
-        let canopy = TestCanopyClient::new(task_with_status("in_progress"), incomplete_report(0, 3));
+        let canopy =
+            TestCanopyClient::new(task_with_status("in_progress"), incomplete_report(0, 3));
         let config = MonitorConfig::default();
 
         let result = check_progress(&wf, &canopy, &config, Utc::now());

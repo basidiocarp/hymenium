@@ -1,4 +1,6 @@
-use super::{CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail, TaskOptions};
+use super::{
+    CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail, TaskOptions,
+};
 
 // ---------------------------------------------------------------------------
 // CliCanopyClient
@@ -112,9 +114,8 @@ impl CanopyClient for CliCanopyClient {
 
     fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
         let json = self.run(&["task", "get", task_id, "--json"])?;
-        serde_json::from_str(&json).map_err(|e| {
-            DispatchError::CanopyError(format!("failed to parse task detail: {e}"))
-        })
+        serde_json::from_str(&json)
+            .map_err(|e| DispatchError::CanopyError(format!("failed to parse task detail: {e}")))
     }
 
     fn check_completeness(&self, handoff_path: &str) -> Result<CompletenessReport, DispatchError> {
@@ -135,9 +136,8 @@ impl CanopyClient for CliCanopyClient {
             args.push(agent);
         }
         let json = self.run(&args)?;
-        serde_json::from_str(&json).map_err(|e| {
-            DispatchError::CanopyError(format!("failed to parse import result: {e}"))
-        })
+        serde_json::from_str(&json)
+            .map_err(|e| DispatchError::CanopyError(format!("failed to parse import result: {e}")))
     }
 }
 

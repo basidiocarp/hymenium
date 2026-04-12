@@ -112,9 +112,9 @@ impl CanopyClient for MockCanopyClient {
 
     fn assign_task(&self, task_id: &str, agent_id: &str) -> Result<(), DispatchError> {
         let mut tasks = self.tasks.borrow_mut();
-        let detail = tasks.get_mut(task_id).ok_or_else(|| {
-            DispatchError::InvalidState(format!("task {task_id} not found"))
-        })?;
+        let detail = tasks
+            .get_mut(task_id)
+            .ok_or_else(|| DispatchError::InvalidState(format!("task {task_id} not found")))?;
         detail.agent_id = Some(agent_id.to_string());
         detail.status = "assigned".to_string();
         Ok(())
@@ -128,10 +128,7 @@ impl CanopyClient for MockCanopyClient {
             .ok_or_else(|| DispatchError::InvalidState(format!("task {task_id} not found")))
     }
 
-    fn check_completeness(
-        &self,
-        _handoff_path: &str,
-    ) -> Result<CompletenessReport, DispatchError> {
+    fn check_completeness(&self, _handoff_path: &str) -> Result<CompletenessReport, DispatchError> {
         Ok(self.default_completeness.clone())
     }
 

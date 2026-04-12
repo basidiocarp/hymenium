@@ -4,7 +4,11 @@
 //! The `WorkflowEngine` trait is defined in CLAUDE.md and will be implemented here
 //! once the workflow template engine (#118e) is built.
 
-use crate::workflow::{WorkflowId, gate::{GateCondition, GateContext, GateEvaluator}, template::WorkflowTemplate};
+use crate::workflow::{
+    gate::{GateCondition, GateContext, GateEvaluator},
+    template::WorkflowTemplate,
+    WorkflowId,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -254,9 +258,9 @@ impl WorkflowInstance {
             .current_phase()
             .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
 
-        let template_phase = self.current_template_phase().ok_or_else(|| {
-            WorkflowError::StateError("template phase not found".to_string())
-        })?;
+        let template_phase = self
+            .current_template_phase()
+            .ok_or_else(|| WorkflowError::StateError("template phase not found".to_string()))?;
 
         let conditions: Vec<GateCondition> = template_phase
             .exit_gate
@@ -267,12 +271,12 @@ impl WorkflowInstance {
 
         let context = GateContext::new(self.workflow_id.clone(), &phase_state.phase_id);
 
-        let evaluation = evaluator
-            .evaluate_all(&conditions, &context)
-            .map_err(|e| WorkflowError::GateFailed {
+        let evaluation = evaluator.evaluate_all(&conditions, &context).map_err(|e| {
+            WorkflowError::GateFailed {
                 phase_id: phase_state.phase_id.clone(),
                 reason: e.to_string(),
-            })?;
+            }
+        })?;
 
         Ok(evaluation.passed())
     }
@@ -283,7 +287,10 @@ impl WorkflowInstance {
     /// current phase and entry gates on the next phase. If the current phase
     /// is the final phase and its exit gates pass, the workflow is marked
     /// Completed and an error is returned (use `complete_workflow()` instead).
-    pub fn advance(&mut self, evaluator: &impl GateEvaluator) -> WorkflowEngineResult<PhaseTransition> {
+    pub fn advance(
+        &mut self,
+        evaluator: &impl GateEvaluator,
+    ) -> WorkflowEngineResult<PhaseTransition> {
         // Guard: current phase must be completed before advancing
         let current = self
             .current_phase()
@@ -305,9 +312,9 @@ impl WorkflowInstance {
 
         // Check exit gates of current phase
         if !self.can_advance(evaluator)? {
-            let phase = self.current_phase().ok_or_else(|| {
-                WorkflowError::StateError("no current phase".to_string())
-            })?;
+            let phase = self
+                .current_phase()
+                .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
             return Err(WorkflowError::GateFailed {
                 phase_id: phase.phase_id.clone(),
                 reason: "exit gate conditions not met".to_string(),
@@ -332,10 +339,8 @@ impl WorkflowInstance {
             .map(|s| crate::workflow::gate::parse_gate_condition(s))
             .collect();
         if !entry_conditions.is_empty() {
-            let entry_context = GateContext::new(
-                self.workflow_id.clone(),
-                &next_template_phase.phase_id,
-            );
+            let entry_context =
+                GateContext::new(self.workflow_id.clone(), &next_template_phase.phase_id);
             let entry_eval = evaluator
                 .evaluate_all(&entry_conditions, &entry_context)
                 .map_err(|e| WorkflowError::GateFailed {
@@ -345,10 +350,7 @@ impl WorkflowInstance {
             if !entry_eval.passed() {
                 return Err(WorkflowError::GateFailed {
                     phase_id: next_template_phase.phase_id.clone(),
-                    reason: format!(
-                        "entry gate conditions not met: {:?}",
-                        entry_eval.failures()
-                    ),
+                    reason: format!("entry gate conditions not met: {:?}", entry_eval.failures()),
                 });
             }
         }

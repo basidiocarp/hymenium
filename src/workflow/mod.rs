@@ -9,7 +9,7 @@ pub mod template;
 
 // Re-export commonly used types
 pub use engine::{PhaseState, PhaseStatus, PhaseTransition, WorkflowInstance, WorkflowStatus};
-pub use gate::{GateCondition, GateContext, GateEvaluator, GateEvaluation, MockGateEvaluator};
+pub use gate::{GateCondition, GateContext, GateEvaluation, GateEvaluator, MockGateEvaluator};
 pub use template::{AgentRole, AgentTier, Gate, Phase, TemplateRegistry, WorkflowTemplate};
 
 /// Strongly-typed workflow identifier.

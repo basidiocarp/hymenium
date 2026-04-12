@@ -10,9 +10,9 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::parser::{ParsedHandoff, ParsedStep};
 #[cfg(test)]
 use crate::parser::HandoffMetadata;
+use crate::parser::{ParsedHandoff, ParsedStep};
 use crate::workflow::template::AgentTier;
 
 mod algorithm;
@@ -145,7 +145,8 @@ pub fn decompose(
     let mut step_to_piece: HashMap<u32, usize> = HashMap::new();
 
     // --- 1. Group by project ---
-    let project_groups = algorithm::group_by_project(&handoff.steps, config.respect_project_boundaries);
+    let project_groups =
+        algorithm::group_by_project(&handoff.steps, config.respect_project_boundaries);
 
     for (_project, project_steps) in &project_groups {
         // --- 2. Merge dependency-connected steps into atomic chunks ---
@@ -337,7 +338,9 @@ mod tests {
 
     #[test]
     fn split_at_step_count_boundary() {
-        let steps: Vec<ParsedStep> = (1..=7).map(|i| make_step(i, &format!("Step {}", i))).collect();
+        let steps: Vec<ParsedStep> = (1..=7)
+            .map(|i| make_step(i, &format!("Step {}", i)))
+            .collect();
         let handoff = make_handoff("Big Task", steps);
         let config = DecompositionConfig {
             max_steps_per_piece: 3,
@@ -595,7 +598,9 @@ mod tests {
 
     #[test]
     fn fallback_to_step_count_when_no_effort() {
-        let steps: Vec<ParsedStep> = (1..=5).map(|i| make_step(i, &format!("Step {}", i))).collect();
+        let steps: Vec<ParsedStep> = (1..=5)
+            .map(|i| make_step(i, &format!("Step {}", i)))
+            .collect();
         let handoff = make_handoff("No Effort", steps);
         let config = DecompositionConfig {
             max_steps_per_piece: 2,

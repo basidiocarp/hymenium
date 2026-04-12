@@ -11,17 +11,20 @@ pub fn parse_effort_secs(effort: &str) -> Result<u64, DecompositionError> {
 
     // Detect the unit.
     let (numeric_part, multiplier) = if s.contains("day") {
-        let num = s.split(|c: char| c.is_alphabetic() || c == ' ')
+        let num = s
+            .split(|c: char| c.is_alphabetic() || c == ' ')
             .next()
             .unwrap_or("");
         (num, 8 * 3600u64) // 1 day = 8 working hours
     } else if s.contains("hour") || s.ends_with('h') {
-        let num = s.split(|c: char| c.is_alphabetic() || c == ' ')
+        let num = s
+            .split(|c: char| c.is_alphabetic() || c == ' ')
             .next()
             .unwrap_or("");
         (num, 3600u64)
     } else if s.contains("minute") || s.ends_with('m') {
-        let num = s.split(|c: char| c.is_alphabetic() || c == ' ')
+        let num = s
+            .split(|c: char| c.is_alphabetic() || c == ' ')
             .next()
             .unwrap_or("");
         (num, 60u64)

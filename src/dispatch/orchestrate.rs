@@ -81,8 +81,7 @@ pub fn dispatch_workflow(
             verification_required: !phase.exit_gate.requires.is_empty(),
         };
 
-        let subtask_id =
-            canopy.create_subtask(&parent_task_id, &title, &description, &options)?;
+        let subtask_id = canopy.create_subtask(&parent_task_id, &title, &description, &options)?;
 
         state.canopy_task_id = Some(subtask_id);
     }
@@ -122,7 +121,13 @@ pub fn handoff_slug(title: &str) -> String {
     let slug: String = title
         .to_lowercase()
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
 
     // Collapse consecutive hyphens.
@@ -186,13 +191,9 @@ mod tests {
         let template = impl_audit_default();
         let handoff = test_handoff();
 
-        let instance = dispatch_workflow(
-            &handoff,
-            &template,
-            WorkflowId("wf-1".to_string()),
-            &mock,
-        )
-        .expect("dispatch should succeed");
+        let instance =
+            dispatch_workflow(&handoff, &template, WorkflowId("wf-1".to_string()), &mock)
+                .expect("dispatch should succeed");
 
         // 1 parent + 2 phase subtasks = 3 tasks total.
         assert_eq!(mock.task_count(), 3);
@@ -208,13 +209,9 @@ mod tests {
         let template = impl_audit_default();
         let handoff = test_handoff();
 
-        let instance = dispatch_workflow(
-            &handoff,
-            &template,
-            WorkflowId("wf-2".to_string()),
-            &mock,
-        )
-        .expect("dispatch should succeed");
+        let instance =
+            dispatch_workflow(&handoff, &template, WorkflowId("wf-2".to_string()), &mock)
+                .expect("dispatch should succeed");
 
         // First phase should have an assigned agent.
         let agent = instance.phase_states[0]
@@ -233,13 +230,9 @@ mod tests {
         let template = impl_audit_default();
         let handoff = test_handoff();
 
-        let instance = dispatch_workflow(
-            &handoff,
-            &template,
-            WorkflowId("wf-3".to_string()),
-            &mock,
-        )
-        .expect("dispatch should succeed");
+        let instance =
+            dispatch_workflow(&handoff, &template, WorkflowId("wf-3".to_string()), &mock)
+                .expect("dispatch should succeed");
 
         assert_eq!(
             instance.status,
@@ -262,12 +255,18 @@ mod tests {
 
     #[test]
     fn slug_lowercases_and_replaces_spaces() {
-        assert_eq!(handoff_slug("Canopy Dispatch Integration"), "canopy-dispatch-integration");
+        assert_eq!(
+            handoff_slug("Canopy Dispatch Integration"),
+            "canopy-dispatch-integration"
+        );
     }
 
     #[test]
     fn slug_collapses_special_chars() {
-        assert_eq!(handoff_slug("feat: add -- new  stuff!"), "feat-add-new-stuff");
+        assert_eq!(
+            handoff_slug("feat: add -- new  stuff!"),
+            "feat-add-new-stuff"
+        );
     }
 
     #[test]
@@ -288,13 +287,9 @@ mod tests {
         let template = impl_audit_default();
         let handoff = test_handoff();
 
-        let instance = dispatch_workflow(
-            &handoff,
-            &template,
-            WorkflowId("e2e-1".to_string()),
-            &mock,
-        )
-        .expect("dispatch should succeed");
+        let instance =
+            dispatch_workflow(&handoff, &template, WorkflowId("e2e-1".to_string()), &mock)
+                .expect("dispatch should succeed");
 
         // Correct number of phases.
         assert_eq!(instance.phase_states.len(), 2);
@@ -309,7 +304,10 @@ mod tests {
             .as_ref()
             .expect("should have task id");
         let task = mock.get_task(first_task_id).expect("task should exist");
-        assert!(task.agent_id.is_some(), "first phase task should be assigned");
+        assert!(
+            task.agent_id.is_some(),
+            "first phase task should be assigned"
+        );
 
         // Second phase subtask exists but is not assigned.
         let second_task_id = instance.phase_states[1]
@@ -317,7 +315,10 @@ mod tests {
             .as_ref()
             .expect("should have task id");
         let task = mock.get_task(second_task_id).expect("task should exist");
-        assert!(task.agent_id.is_none(), "second phase task should not be assigned yet");
+        assert!(
+            task.agent_id.is_none(),
+            "second phase task should not be assigned yet"
+        );
     }
 
     #[test]
@@ -400,6 +401,9 @@ mod tests {
             .as_ref()
             .expect("first phase should have agent");
         // Should use "hymenium" not "/path/to/hymenium"
-        assert!(agent.starts_with("implementer/hymenium/"), "agent name was: {agent}");
+        assert!(
+            agent.starts_with("implementer/hymenium/"),
+            "agent name was: {agent}"
+        );
     }
 }

@@ -60,8 +60,7 @@ mod tests {
         };
         let policy = RetryPolicy::default();
 
-        let action = handle_signal(&signal, &mut wf, 0, &policy)
-            .expect("should succeed");
+        let action = handle_signal(&signal, &mut wf, 0, &policy).expect("should succeed");
         assert!(matches!(action, RecoveryAction::Cancel { .. }));
         assert_eq!(wf.phase_states[0].status, PhaseStatus::Completed);
     }
@@ -76,8 +75,7 @@ mod tests {
         };
         let policy = RetryPolicy::default();
 
-        let action = handle_signal(&signal, &mut wf, 0, &policy)
-            .expect("should succeed");
+        let action = handle_signal(&signal, &mut wf, 0, &policy).expect("should succeed");
         assert!(matches!(action, RecoveryAction::Retry { .. }));
     }
 
@@ -90,8 +88,7 @@ mod tests {
         };
         let policy = RetryPolicy::default();
 
-        let action = handle_signal(&signal, &mut wf, 0, &policy)
-            .expect("should succeed");
+        let action = handle_signal(&signal, &mut wf, 0, &policy).expect("should succeed");
         assert!(matches!(action, RecoveryAction::Cancel { .. }));
     }
 

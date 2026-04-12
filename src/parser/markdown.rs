@@ -4,8 +4,8 @@
 //! including metadata, steps, and verification blocks.
 
 use crate::parser::{
-    ChecklistItem, Dispatchability, FileModification, HandoffMetadata, ParsedHandoff, ParsedStep,
-    ParseError, PasteMarker, VerificationBlock,
+    ChecklistItem, Dispatchability, FileModification, HandoffMetadata, ParseError, ParsedHandoff,
+    ParsedStep, PasteMarker, VerificationBlock,
 };
 
 /// Parse a handoff markdown document into structured data.
@@ -90,8 +90,10 @@ fn extract_metadata(lines: &[&str]) -> Option<HandoffMetadata> {
                     metadata.owning_repo = value.1.trim_matches('`').to_string();
                 }
                 "Allowed write scope" => {
-                    metadata.allowed_write_scope =
-                        split_scope(&value.1).into_iter().map(std::string::ToString::to_string).collect();
+                    metadata.allowed_write_scope = split_scope(&value.1)
+                        .into_iter()
+                        .map(std::string::ToString::to_string)
+                        .collect();
                 }
                 "Cross-repo edits" => {
                     if !value.1.to_lowercase().contains("none") {
@@ -151,9 +153,7 @@ fn extract_section(lines: &[&str], section_heading: &str) -> Result<String, Pars
         if in_section {
             // Stop at next section heading or horizontal rule
             if !in_code_block
-                && (line.starts_with("## ")
-                    || line.starts_with("### ")
-                    || line.starts_with("---"))
+                && (line.starts_with("## ") || line.starts_with("### ") || line.starts_with("---"))
             {
                 break;
             }
@@ -291,7 +291,8 @@ fn parse_step(number: u32, title: String, lines: &[&str]) -> ParsedStep {
 
     for line in lines.iter().skip(1) {
         if in_metadata && line.starts_with("**Project:**") {
-            project = extract_key_value(line, "**Project:**").map(|v| v.trim_matches('`').to_string());
+            project =
+                extract_key_value(line, "**Project:**").map(|v| v.trim_matches('`').to_string());
         } else if in_metadata && line.starts_with("**Effort:**") {
             effort = extract_key_value(line, "**Effort:**");
         } else if in_metadata && line.starts_with("**Depends on:**") {
@@ -385,7 +386,10 @@ fn extract_file_modification(line: &str) -> Option<(String, String)> {
 
     let description = if let Some(sep) = rest.find('\u{2014}') {
         // em-dash
-        rest[sep..].trim_start_matches('\u{2014}').trim_start().to_string()
+        rest[sep..]
+            .trim_start_matches('\u{2014}')
+            .trim_start()
+            .to_string()
     } else if let Some(sep) = rest.find('-') {
         rest[sep..].trim_start_matches('-').trim_start().to_string()
     } else {

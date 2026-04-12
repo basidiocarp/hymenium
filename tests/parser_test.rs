@@ -76,7 +76,10 @@ fn test_sub_task_hierarchy_handoff() {
     // Verify step 2 has depends_on relationship
     let step1 = &handoff.steps[0];
     assert_eq!(step1.number, 1);
-    assert_eq!(step1.title, "Enforce child-completion invariant at task completion");
+    assert_eq!(
+        step1.title,
+        "Enforce child-completion invariant at task completion"
+    );
     assert!(step1.effort.is_some());
     assert_eq!(step1.effort.as_ref().unwrap(), "1 day");
 
@@ -109,7 +112,10 @@ fn test_old_format_handoff_without_metadata() {
     let handoff = result.unwrap();
 
     // Verify title
-    assert_eq!(handoff.title, "Session-End Hook for Automatic Memory Capture");
+    assert_eq!(
+        handoff.title,
+        "Session-End Hook for Automatic Memory Capture"
+    );
 
     // Verify metadata is None for old format
     assert!(handoff.metadata.is_none());
@@ -165,9 +171,17 @@ fn test_verification_commands_extracted() {
 
     for step in &handoff.steps {
         // All steps should have verification blocks
-        assert!(step.verification.is_some(), "Step {} missing verification", step.number);
+        assert!(
+            step.verification.is_some(),
+            "Step {} missing verification",
+            step.number
+        );
         let verify = step.verification.as_ref().unwrap();
-        assert!(!verify.commands.is_empty(), "Step {} has no commands", step.number);
+        assert!(
+            !verify.commands.is_empty(),
+            "Step {} has no commands",
+            step.number
+        );
     }
 }
 
