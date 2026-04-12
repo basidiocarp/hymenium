@@ -1,0 +1,48 @@
+[package]
+name = "hymenium"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+authors = ["William Newton"]
+description = "Workflow orchestration engine for multi-agent task execution"
+license = "MIT"
+repository = "https://github.com/basidiocarp/hymenium"
+keywords = ["basidiocarp", "agents", "orchestration", "workflow", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+spore = { git = "https://github.com/basidiocarp/spore", tag = "v0.4.9" }
+thiserror = "2"
+rusqlite = { version = "0.39", features = ["bundled"] }
+tracing = "0.1"
+ulid = "1"
+toml = "1"
+
+[dev-dependencies]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[lints.rust]
+unsafe_code = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Allow high-volume cosmetic pedantic lints for initial codebase;
+# tighten as code is touched.
+missing_errors_doc = "allow"
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+format_push_string = "allow"
+uninlined_format_args = "allow"
