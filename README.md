@@ -24,6 +24,7 @@ The implementer/auditor workflow is the first built-in template. Hymenium enforc
 
 | Tool | Purpose |
 |------|---------|
+| **[annulus](https://github.com/basidiocarp/annulus)** | Cross-ecosystem operator utilities |
 | **[hymenium](https://github.com/basidiocarp/hymenium)** | Workflow orchestration engine (this project) |
 | **[canopy](https://github.com/basidiocarp/canopy)** | Multi-agent coordination ledger |
 | **[cap](https://github.com/basidiocarp/cap)** | Web dashboard for the ecosystem |

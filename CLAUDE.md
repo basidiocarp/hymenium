@@ -12,9 +12,10 @@ Hymenium is a workflow orchestration engine for multi-agent task execution. It i
 
 - Does not store tasks or coordination records (Canopy owns the ledger; Hymenium reads and writes through Canopy's MCP surface)
 - Does not capture lifecycle events or session signals (Cortina owns hook capture and attribution)
-- Does not manage agent sessions or execution hosts (Volva owns the execution seam)
+- Does not host agent execution or manage runtime sessions (Volva owns that)
 - Does not hold long-term memory or indexed documents (Hyphae owns memory and retrieval)
 - Does not handle installation, update, or doctor flows (Stipe owns the install lifecycle)
+- Does not provide operator utilities like statuslines (Annulus owns that)
 
 ---
 
