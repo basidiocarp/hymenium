@@ -4,6 +4,14 @@ All notable changes to Hymenium are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-14
+
+### Fixed
+
+- **CLI version surface**: `hymenium --version` now works, so external installers
+  and verification steps can validate the binary without falling through to a
+  subcommand error.
+
 ## [0.1.0] - 2026-04-11
 
 ### Added

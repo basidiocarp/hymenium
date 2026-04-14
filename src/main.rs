@@ -6,6 +6,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "hymenium")]
 #[command(about = "Handoff workflow orchestration for multi-agent systems", long_about = None)]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
