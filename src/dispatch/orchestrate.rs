@@ -1,3 +1,5 @@
+use super::capability;
+use super::task_packet::{CapabilityRequirements, TaskPacket};
 use super::{CanopyClient, DispatchError, TaskOptions};
 use crate::context::{
     estimate_text_tokens, BudgetContextEngine, CompressionParams, ContextEngine, ContextMessage,
@@ -21,10 +23,16 @@ const DISPATCH_CONTEXT_TOKEN_BUDGET: usize = 64;
 /// The first phase's agent is assigned if the phase defines a specific role.
 /// Returns a `WorkflowInstance` with status `Dispatched` and canopy task IDs
 /// populated in each `PhaseState`.
+///
+/// # Panics
+///
+/// Panics if `serde_json` fails to serialize a `TaskPacket`. This is considered
+/// a programming error because `TaskPacket` contains only primitive JSON-compatible
+/// types derived from `serde::Serialize` with no serde-incompatible fields.
 pub fn dispatch_workflow(
     handoff: &ParsedHandoff,
     template: &WorkflowTemplate,
-    workflow_id: WorkflowId,
+    workflow_id: &WorkflowId,
     canopy: &dyn CanopyClient,
 ) -> Result<WorkflowInstance, DispatchError> {
     // Guard: template must have at least one phase.
@@ -59,12 +67,19 @@ pub fn dispatch_workflow(
     let parent_description =
         prepare_parent_description(&dispatch_messages, focus_topic.as_deref())?;
 
+    // Derive capability requirements from the owning repo name so tasks carry
+    // the right capability hints at dispatch time.
+    let repo_required_capabilities = capability::capabilities_for_repo(repo_name);
+
     // Create the parent canopy task from the handoff.
     let parent_task_id = canopy.create_task(
         &handoff.title,
         &parent_description,
         project_root,
-        &TaskOptions::default(),
+        &TaskOptions {
+            required_capabilities: repo_required_capabilities.clone(),
+            ..TaskOptions::default()
+        },
     )?;
 
     // Build the workflow instance.
@@ -73,7 +88,11 @@ pub fn dispatch_workflow(
         .as_ref()
         .map(|m| m.owning_repo.clone())
         .unwrap_or_default();
-    let mut instance = WorkflowInstance::new(workflow_id, template.clone(), handoff_path);
+    let mut instance = WorkflowInstance::new(workflow_id.clone(), template.clone(), &handoff_path);
+
+    // Derive constraints and acceptance criteria from the handoff for packets.
+    let constraints = build_constraints(handoff);
+    let acceptance_criteria = build_acceptance_criteria(handoff);
 
     // Create a subtask for each phase and store its canopy task ID.
     // NOTE: If a subtask creation fails mid-loop, previously created tasks in
@@ -82,14 +101,39 @@ pub fn dispatch_workflow(
     // TODO(#118f-rollback): add CanopyClient::cancel_task and compensate on failure.
     for (phase, state) in template.phases.iter().zip(instance.phase_states.iter_mut()) {
         let title = format!("[{}] {}", phase.role, phase.phase_id);
-        let description = format!(
-            "Phase: {} | Role: {} | Tier: {}",
-            phase.phase_id, phase.role, phase.agent_tier
+
+        // Build a structured task packet for this phase.
+        let required_capabilities = CapabilityRequirements {
+            tier: phase.agent_tier.to_string(),
+            tools: vec!["bash".to_string(), "read".to_string(), "write".to_string()],
+        };
+        let goal = format!(
+            "Execute the '{}' phase ({}) for handoff: {}",
+            phase.phase_id, phase.role, handoff.title
         );
+        let packet = TaskPacket::new(
+            workflow_id.0.clone(),
+            phase.phase_id.clone(),
+            goal,
+            constraints.clone(),
+            acceptance_criteria.clone(),
+            required_capabilities,
+        );
+
+        // Serialize packet as structured JSON embedded in the description.
+        let packet_json = serde_json::to_string(&packet).expect(
+            "TaskPacket serialization is infallible — all fields are known-good serde types",
+        );
+        let description = format!(
+            "Phase: {} | Role: {} | Tier: {}\n\nTask packet:\n{}",
+            phase.phase_id, phase.role, phase.agent_tier, packet_json
+        );
+
         let options = TaskOptions {
             required_role: Some(phase.role.clone()),
             required_tier: Some(phase.agent_tier.clone()),
             verification_required: !phase.exit_gate.requires.is_empty(),
+            required_capabilities: repo_required_capabilities.clone(),
         };
 
         let subtask_id = canopy.create_subtask(&parent_task_id, &title, &description, &options)?;
@@ -216,6 +260,40 @@ fn truncate_rendered_context(text: &str, token_budget: usize) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Packet helpers
+// ---------------------------------------------------------------------------
+
+/// Build constraint strings from the handoff metadata.
+fn build_constraints(handoff: &ParsedHandoff) -> Vec<String> {
+    let mut constraints = Vec::new();
+    if let Some(meta) = &handoff.metadata {
+        for scope in &meta.allowed_write_scope {
+            constraints.push(format!("Write scope limited to {}", scope));
+        }
+        for goal in &meta.non_goals {
+            constraints.push(format!("Non-goal (do not implement): {}", goal));
+        }
+    }
+    constraints
+}
+
+/// Build acceptance criteria from the handoff steps' checklists.
+fn build_acceptance_criteria(handoff: &ParsedHandoff) -> Vec<String> {
+    let mut criteria = Vec::new();
+    for step in &handoff.steps {
+        if let Some(verification) = &step.verification {
+            for cmd in &verification.commands {
+                criteria.push(format!("Verification passes: {}", cmd));
+            }
+        }
+        for item in &step.checklist {
+            criteria.push(item.text.clone());
+        }
+    }
+    criteria
+}
+
+// ---------------------------------------------------------------------------
 // Agent naming
 // ---------------------------------------------------------------------------
 
@@ -304,7 +382,7 @@ mod tests {
         let handoff = test_handoff();
 
         let instance =
-            dispatch_workflow(&handoff, &template, WorkflowId("wf-1".to_string()), &mock)
+            dispatch_workflow(&handoff, &template, &WorkflowId("wf-1".to_string()), &mock)
                 .expect("dispatch should succeed");
 
         // 1 parent + 2 phase subtasks = 3 tasks total.
@@ -322,15 +400,15 @@ mod tests {
         let handoff = test_handoff();
 
         let instance =
-            dispatch_workflow(&handoff, &template, WorkflowId("wf-2".to_string()), &mock)
+            dispatch_workflow(&handoff, &template, &WorkflowId("wf-2".to_string()), &mock)
                 .expect("dispatch should succeed");
 
-        // First phase should have an assigned agent.
+        // First phase should have an assigned agent using reset role name.
         let agent = instance.phase_states[0]
             .agent_id
             .as_ref()
             .expect("first phase should have agent");
-        assert!(agent.starts_with("implementer/"));
+        assert!(agent.starts_with("Worker/"));
 
         // Second phase should not be assigned yet.
         assert!(instance.phase_states[1].agent_id.is_none());
@@ -343,7 +421,7 @@ mod tests {
         let handoff = test_handoff();
 
         let instance =
-            dispatch_workflow(&handoff, &template, WorkflowId("wf-3".to_string()), &mock)
+            dispatch_workflow(&handoff, &template, &WorkflowId("wf-3".to_string()), &mock)
                 .expect("dispatch should succeed");
 
         assert_eq!(
@@ -356,11 +434,11 @@ mod tests {
 
     #[test]
     fn agent_name_follows_convention() {
-        let name = agent_name(&AgentRole::Implementer, "spore", "otel-foundation", 1);
-        assert_eq!(name, "implementer/spore/otel-foundation/1");
+        let name = agent_name(&AgentRole::Worker, "spore", "otel-foundation", 1);
+        assert_eq!(name, "Worker/spore/otel-foundation/1");
 
-        let name = agent_name(&AgentRole::Auditor, "hymenium", "dispatch-layer", 2);
-        assert_eq!(name, "auditor/hymenium/dispatch-layer/2");
+        let name = agent_name(&AgentRole::OutputVerifier, "hymenium", "dispatch-layer", 2);
+        assert_eq!(name, "Output Verifier/hymenium/dispatch-layer/2");
     }
 
     // -- handoff_slug ---------------------------------------------------------
@@ -400,7 +478,7 @@ mod tests {
         let handoff = test_handoff();
 
         let instance =
-            dispatch_workflow(&handoff, &template, WorkflowId("e2e-1".to_string()), &mock)
+            dispatch_workflow(&handoff, &template, &WorkflowId("e2e-1".to_string()), &mock)
                 .expect("dispatch should succeed");
 
         // Correct number of phases.
@@ -449,7 +527,7 @@ mod tests {
         let result = dispatch_workflow(
             &handoff,
             &template,
-            WorkflowId("wf-empty".to_string()),
+            &WorkflowId("wf-empty".to_string()),
             &mock,
         );
         assert!(result.is_err());
@@ -466,7 +544,7 @@ mod tests {
         let result = dispatch_workflow(
             &handoff,
             &template,
-            WorkflowId("wf-slug".to_string()),
+            &WorkflowId("wf-slug".to_string()),
             &mock,
         );
         assert!(result.is_err());
@@ -503,7 +581,7 @@ mod tests {
         let instance = dispatch_workflow(
             &handoff,
             &template,
-            WorkflowId("wf-basename".to_string()),
+            &WorkflowId("wf-basename".to_string()),
             &mock,
         )
         .expect("dispatch should succeed");
@@ -514,7 +592,7 @@ mod tests {
             .expect("first phase should have agent");
         // Should use "hymenium" not "/path/to/hymenium"
         assert!(
-            agent.starts_with("implementer/hymenium/"),
+            agent.starts_with("Worker/hymenium/"),
             "agent name was: {agent}"
         );
     }
@@ -525,7 +603,7 @@ mod tests {
 
         assert_eq!(
             dispatch_focus_topic(&template).as_deref(),
-            Some("implement implementer")
+            Some("implement Worker")
         );
     }
 
@@ -542,7 +620,7 @@ mod tests {
         let instance = dispatch_workflow(
             &handoff,
             &template,
-            WorkflowId("wf-compress".to_string()),
+            &WorkflowId("wf-compress".to_string()),
             &mock,
         )
         .expect("dispatch should succeed");
@@ -555,5 +633,109 @@ mod tests {
         assert!(!description.contains("problem problem problem problem problem problem problem problem problem problem problem problem"));
         assert!(estimate_text_tokens(&description) <= DISPATCH_CONTEXT_TOKEN_BUDGET);
         assert_eq!(instance.phase_states.len(), 2);
+    }
+
+    // -- capability requirement dispatch tests -----------------------------------
+
+    #[test]
+    fn dispatch_emits_rust_capabilities_for_hymenium_repo() {
+        let mock = MockCanopyClient::new();
+        let template = impl_audit_default();
+        let mut handoff = test_handoff();
+        handoff.metadata = Some(crate::parser::HandoffMetadata {
+            dispatchability: crate::parser::Dispatchability::Direct,
+            owning_repo: "/path/to/hymenium".to_string(),
+            allowed_write_scope: vec!["src/".to_string()],
+            cross_repo_rule: None,
+            non_goals: Vec::new(),
+            verification_contract: "cargo test".to_string(),
+            completion_update: String::new(),
+        });
+
+        dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("wf-caps-1".to_string()),
+            &mock,
+        )
+        .expect("dispatch should succeed");
+
+        // Parent task (mock-task-1) should carry "rust" capability.
+        let parent = mock
+            .get_task("mock-task-1")
+            .expect("parent task should exist");
+        assert!(
+            parent.required_capabilities.contains(&"rust".to_string()),
+            "expected rust capability on parent task, got: {:?}",
+            parent.required_capabilities
+        );
+
+        // Phase subtask (mock-task-2) should also carry "rust".
+        let phase = mock
+            .get_task("mock-task-2")
+            .expect("phase task should exist");
+        assert!(
+            phase.required_capabilities.contains(&"rust".to_string()),
+            "expected rust capability on phase task, got: {:?}",
+            phase.required_capabilities
+        );
+    }
+
+    #[test]
+    fn dispatch_emits_no_capabilities_for_unknown_repo() {
+        let mock = MockCanopyClient::new();
+        let template = impl_audit_default();
+        let handoff = test_handoff(); // metadata is None, project_root defaults to "."
+
+        dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("wf-caps-2".to_string()),
+            &mock,
+        )
+        .expect("dispatch should succeed with empty capabilities");
+
+        // Parent task should have empty capabilities — any agent can claim it.
+        let parent = mock
+            .get_task("mock-task-1")
+            .expect("parent task should exist");
+        assert!(
+            parent.required_capabilities.is_empty(),
+            "expected no capabilities for unknown repo, got: {:?}",
+            parent.required_capabilities
+        );
+    }
+
+    #[test]
+    fn dispatch_emits_schema_capabilities_for_septa_repo() {
+        let mock = MockCanopyClient::new();
+        let template = impl_audit_default();
+        let mut handoff = test_handoff();
+        handoff.metadata = Some(crate::parser::HandoffMetadata {
+            dispatchability: crate::parser::Dispatchability::Direct,
+            owning_repo: "septa".to_string(),
+            allowed_write_scope: vec![],
+            cross_repo_rule: None,
+            non_goals: Vec::new(),
+            verification_contract: String::new(),
+            completion_update: String::new(),
+        });
+
+        dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("wf-caps-3".to_string()),
+            &mock,
+        )
+        .expect("dispatch should succeed");
+
+        let parent = mock
+            .get_task("mock-task-1")
+            .expect("parent task should exist");
+        assert!(
+            parent.required_capabilities.contains(&"schema".to_string()),
+            "expected schema capability for septa repo, got: {:?}",
+            parent.required_capabilities
+        );
     }
 }

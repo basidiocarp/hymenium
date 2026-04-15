@@ -11,6 +11,10 @@ flow, and data model.
 
 ## Design Principles
 
+- **Single orchestration authority** -- Hymenium is the authoritative source for
+  workflow lifecycle, phase transitions, dispatch decisions, and escalation.
+  Other tools (Canopy, Cortina, Hyphae) own their respective domains but defer
+  to Hymenium for orchestration semantics.
 - **Workflow-first, not agent-first** -- durable workflow state drives what
   agents do, not the other way around. Agents are assigned by the engine, not
   self-selected.
@@ -49,9 +53,12 @@ flow, and data model.
 
 ### Canopy owns
 
-- Task storage, assignment history, and coordination records
+- The coordination ledger -- task storage, assignment history, and coordination
+  records that make multi-agent work explicit and auditable.
 - Evidence references and verification state
-- Operator queue views and attention surfaces
+- The operator surface -- queue views, attention surfaces, and read models that
+  let operators understand task state and evidence without reconstructing facts
+  from logs
 
 ### Cortina owns
 

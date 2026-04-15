@@ -77,7 +77,7 @@ impl CanopyClient for MockCanopyClient {
         title: &str,
         description: &str,
         _project_root: &str,
-        _options: &TaskOptions,
+        options: &TaskOptions,
     ) -> Result<String, DispatchError> {
         let task_id = self.next_task_id();
         let detail = TaskDetail {
@@ -86,6 +86,7 @@ impl CanopyClient for MockCanopyClient {
             status: "pending".to_string(),
             agent_id: None,
             parent_id: None,
+            required_capabilities: options.required_capabilities.clone(),
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
         self.descriptions
@@ -99,7 +100,7 @@ impl CanopyClient for MockCanopyClient {
         parent_id: &str,
         title: &str,
         description: &str,
-        _options: &TaskOptions,
+        options: &TaskOptions,
     ) -> Result<String, DispatchError> {
         if !self.tasks.borrow().contains_key(parent_id) {
             return Err(DispatchError::TaskCreationFailed(format!(
@@ -113,6 +114,7 @@ impl CanopyClient for MockCanopyClient {
             status: "pending".to_string(),
             agent_id: None,
             parent_id: Some(parent_id.to_string()),
+            required_capabilities: options.required_capabilities.clone(),
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
         self.descriptions
@@ -155,6 +157,7 @@ impl CanopyClient for MockCanopyClient {
             status: "pending".to_string(),
             agent_id: assign_to.map(String::from),
             parent_id: None,
+            required_capabilities: Vec::new(),
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
         self.descriptions

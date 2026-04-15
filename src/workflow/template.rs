@@ -94,23 +94,45 @@ pub struct Gate {
 }
 
 /// Agent role for a workflow phase.
+///
+/// The nine runtime role names match the `workflow-status-v1` contract.
+/// The wire format uses human-readable names (e.g., "Spec Author") via
+/// explicit `#[serde(rename = ...)]` attributes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum AgentRole {
-    Implementer,
-    Auditor,
-    Reviewer,
-    Operator,
+    #[serde(rename = "Spec Author")]
+    SpecAuthor,
+    #[serde(rename = "Workflow Planner")]
+    WorkflowPlanner,
+    #[serde(rename = "Packet Compiler")]
+    PacketCompiler,
+    #[serde(rename = "Decomposition Checker")]
+    DecompositionChecker,
+    #[serde(rename = "Workflow Coordinator")]
+    WorkflowCoordinator,
+    #[serde(rename = "Worker")]
+    Worker,
+    #[serde(rename = "Output Verifier")]
+    OutputVerifier,
+    #[serde(rename = "Repair Worker")]
+    RepairWorker,
+    #[serde(rename = "Final Verifier")]
+    FinalVerifier,
 }
 
 impl std::fmt::Display for AgentRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AgentRole::Implementer => write!(f, "implementer"),
-            AgentRole::Auditor => write!(f, "auditor"),
-            AgentRole::Reviewer => write!(f, "reviewer"),
-            AgentRole::Operator => write!(f, "operator"),
+            AgentRole::SpecAuthor => write!(f, "Spec Author"),
+            AgentRole::WorkflowPlanner => write!(f, "Workflow Planner"),
+            AgentRole::PacketCompiler => write!(f, "Packet Compiler"),
+            AgentRole::DecompositionChecker => write!(f, "Decomposition Checker"),
+            AgentRole::WorkflowCoordinator => write!(f, "Workflow Coordinator"),
+            AgentRole::Worker => write!(f, "Worker"),
+            AgentRole::OutputVerifier => write!(f, "Output Verifier"),
+            AgentRole::RepairWorker => write!(f, "Repair Worker"),
+            AgentRole::FinalVerifier => write!(f, "Final Verifier"),
         }
     }
 }
@@ -211,7 +233,7 @@ pub fn impl_audit_default() -> WorkflowTemplate {
         phases: vec![
             Phase {
                 phase_id: "implement".to_string(),
-                role: AgentRole::Implementer,
+                role: AgentRole::Worker,
                 agent_tier: AgentTier::Sonnet,
                 entry_gate: Gate {
                     requires: vec![],
@@ -225,7 +247,7 @@ pub fn impl_audit_default() -> WorkflowTemplate {
             },
             Phase {
                 phase_id: "audit".to_string(),
-                role: AgentRole::Auditor,
+                role: AgentRole::OutputVerifier,
                 agent_tier: AgentTier::Sonnet,
                 entry_gate: Gate {
                     requires: vec![
@@ -260,14 +282,14 @@ mod tests {
             "phases": [
                 {
                     "phase_id": "implement",
-                    "role": "implementer",
+                    "role": "Worker",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
                     "exit_gate": {"requires": ["code_diff_exists", "verification_passed"]}
                 },
                 {
                     "phase_id": "audit",
-                    "role": "auditor",
+                    "role": "Output Verifier",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": ["code_diff_exists", "verification_passed"]},
                     "exit_gate": {"requires": ["audit_clean", "findings_resolved"]}
@@ -308,7 +330,7 @@ mod tests {
             "phases": [
                 {
                     "phase_id": "phase1",
-                    "role": "implementer",
+                    "role": "Worker",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
                     "exit_gate": {"requires": []}
@@ -341,14 +363,14 @@ mod tests {
             "phases": [
                 {
                     "phase_id": "phase1",
-                    "role": "implementer",
+                    "role": "Worker",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
                     "exit_gate": {"requires": []}
                 },
                 {
                     "phase_id": "phase1",
-                    "role": "auditor",
+                    "role": "Output Verifier",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
                     "exit_gate": {"requires": []}
@@ -396,8 +418,39 @@ mod tests {
 
     #[test]
     fn test_agent_role_display() {
-        assert_eq!(format!("{}", AgentRole::Implementer), "implementer");
-        assert_eq!(format!("{}", AgentRole::Auditor), "auditor");
+        assert_eq!(format!("{}", AgentRole::Worker), "Worker");
+        assert_eq!(format!("{}", AgentRole::OutputVerifier), "Output Verifier");
+        assert_eq!(format!("{}", AgentRole::SpecAuthor), "Spec Author");
+        assert_eq!(format!("{}", AgentRole::FinalVerifier), "Final Verifier");
+    }
+
+    #[test]
+    fn test_impl_audit_roles_match_reset_contract() {
+        // Proves the impl-audit template uses only septa workflow-status-v1 role names.
+        let template = impl_audit_default();
+        let allowed = [
+            "Spec Author",
+            "Workflow Planner",
+            "Packet Compiler",
+            "Decomposition Checker",
+            "Workflow Coordinator",
+            "Worker",
+            "Output Verifier",
+            "Repair Worker",
+            "Final Verifier",
+        ];
+        for phase in &template.phases {
+            let role_str = phase.role.to_string();
+            assert!(
+                allowed.contains(&role_str.as_str()),
+                "phase '{}' has role '{}' not in the allowed septa set",
+                phase.phase_id,
+                role_str
+            );
+        }
+        // Verify the specific assignments.
+        assert_eq!(template.phases[0].role, AgentRole::Worker);
+        assert_eq!(template.phases[1].role, AgentRole::OutputVerifier);
     }
 
     #[test]

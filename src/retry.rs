@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::failure::{FailureKind, TypedFailure};
 use crate::monitor::{ProgressSignal, StallReason};
 use crate::workflow::template::AgentTier;
 
@@ -209,6 +210,139 @@ fn decide_progressive_recovery(
 }
 
 // ---------------------------------------------------------------------------
+// Typed-failure recovery
+// ---------------------------------------------------------------------------
+
+/// Decide a recovery action from a [`TypedFailure`] and the current retry state.
+///
+/// This is the primary entry point when the detection site can classify the
+/// failure precisely. The branching rules are:
+///
+/// | `FailureKind`          | Recovery                                         |
+/// |------------------------|--------------------------------------------------|
+/// | `SpecAmbiguity`        | Always escalate                                  |
+/// | `ContractMismatch`     | Always escalate                                  |
+/// | `ScopeViolation`       | Escalate after the first occurrence              |
+/// | `TaskTooLarge`         | Retry with narrowed scope on first attempt, then escalate |
+/// | `MissingDependency`    | Cancel (dependency gating must be resolved first)|
+/// | `ExecutionIncomplete`  | Retry within `max_retries`, then escalate        |
+/// | `MinorDefect`          | Retry once for a focused repair loop             |
+pub fn decide_recovery_typed(
+    failure: &TypedFailure,
+    retry_count: u32,
+    policy: &RetryPolicy,
+) -> RecoveryAction {
+    match failure.kind {
+        // Ambiguous spec: the work request itself is unclear. Retrying would
+        // produce the same confusion — escalate immediately for clarification.
+        FailureKind::SpecAmbiguity => RecoveryAction::Escalate {
+            reason: format!(
+                "spec ambiguity — cannot retry without operator clarification{}",
+                failure
+                    .detail
+                    .as_deref()
+                    .map(|d| format!(": {d}"))
+                    .unwrap_or_default()
+            ),
+        },
+
+        // Contract mismatch: retrying blindly would produce the same
+        // non-conforming output — escalate for contract review.
+        FailureKind::ContractMismatch => RecoveryAction::Escalate {
+            reason: format!(
+                "contract mismatch — output does not conform to expected schema{}",
+                failure
+                    .detail
+                    .as_deref()
+                    .map(|d| format!(": {d}"))
+                    .unwrap_or_default()
+            ),
+        },
+
+        // Scope violation: the agent wrote outside allowed bounds. Unsafe to
+        // retry without narrowed scope; escalate after the first occurrence.
+        FailureKind::ScopeViolation => RecoveryAction::Escalate {
+            reason: format!(
+                "scope violation — agent edited outside allowed scope{}",
+                failure
+                    .detail
+                    .as_deref()
+                    .map(|d| format!(": {d}"))
+                    .unwrap_or_default()
+            ),
+        },
+
+        // Task too large: retry once with narrowed scope, then escalate.
+        FailureKind::TaskTooLarge => {
+            if retry_count == 0 {
+                RecoveryAction::Retry {
+                    narrowed_scope: Some("decompose task into smaller units".to_string()),
+                    new_tier: None,
+                }
+            } else {
+                RecoveryAction::Escalate {
+                    reason: format!(
+                        "task too large — narrowed scope did not fit context budget after {retry_count} retries"
+                    ),
+                }
+            }
+        }
+
+        // Missing dependency: the prerequisite has not finished. Cancel to
+        // wait for dependency gating; do not retry the same blocked phase.
+        FailureKind::MissingDependency => RecoveryAction::Cancel {
+            reason: format!(
+                "missing dependency — prerequisite task not complete{}",
+                failure
+                    .detail
+                    .as_deref()
+                    .map(|d| format!(": {d}"))
+                    .unwrap_or_default()
+            ),
+        },
+
+        // Execution incomplete: the agent ran but stalled. Normal progressive
+        // retry; escalate when the retry limit is reached.
+        FailureKind::ExecutionIncomplete => {
+            if retry_count >= policy.max_retries {
+                RecoveryAction::Escalate {
+                    reason: format!(
+                        "execution incomplete after {retry_count} retries — retry limit exceeded"
+                    ),
+                }
+            } else {
+                RecoveryAction::Retry {
+                    narrowed_scope: None,
+                    new_tier: None,
+                }
+            }
+        }
+
+        // Minor defect: retry once for a focused repair loop without narrowing
+        // scope. Escalate if the defect persists beyond one retry.
+        FailureKind::MinorDefect => {
+            if retry_count == 0 {
+                RecoveryAction::Retry {
+                    narrowed_scope: None,
+                    new_tier: None,
+                }
+            } else {
+                RecoveryAction::Escalate {
+                    reason: format!(
+                        "minor defect persisted after repair attempt — escalating for review{}",
+                        failure
+                            .detail
+                            .as_deref()
+                            .map(|d| format!(": {d}"))
+                            .unwrap_or_default()
+                    ),
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -404,6 +538,109 @@ mod tests {
         assert_eq!(policy.max_retries, 2);
         assert!(policy.narrow_scope_on_retry);
         assert!(!policy.escalate_tier_on_retry);
+    }
+
+    // -- decide_recovery_typed -----------------------------------------------
+
+    fn policy() -> RetryPolicy {
+        RetryPolicy::default() // max_retries = 2
+    }
+
+    fn typed(kind: FailureKind) -> TypedFailure {
+        TypedFailure::new(kind)
+    }
+
+    #[test]
+    fn spec_ambiguity_always_escalates() {
+        for count in [0, 1, 2, 5] {
+            let action =
+                decide_recovery_typed(&typed(FailureKind::SpecAmbiguity), count, &policy());
+            assert!(
+                matches!(action, RecoveryAction::Escalate { .. }),
+                "expected Escalate for SpecAmbiguity at retry {count}"
+            );
+        }
+    }
+
+    #[test]
+    fn contract_mismatch_always_escalates() {
+        for count in [0, 1, 3] {
+            let action =
+                decide_recovery_typed(&typed(FailureKind::ContractMismatch), count, &policy());
+            assert!(
+                matches!(action, RecoveryAction::Escalate { .. }),
+                "expected Escalate for ContractMismatch at retry {count}"
+            );
+        }
+    }
+
+    #[test]
+    fn scope_violation_escalates_immediately() {
+        let action = decide_recovery_typed(&typed(FailureKind::ScopeViolation), 0, &policy());
+        assert!(matches!(action, RecoveryAction::Escalate { .. }));
+    }
+
+    #[test]
+    fn task_too_large_retries_with_narrowed_scope_first() {
+        let action = decide_recovery_typed(&typed(FailureKind::TaskTooLarge), 0, &policy());
+        match action {
+            RecoveryAction::Retry { narrowed_scope, .. } => {
+                assert!(
+                    narrowed_scope.is_some(),
+                    "TaskTooLarge first retry must include narrowed_scope"
+                );
+            }
+            other => panic!("expected Retry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn task_too_large_escalates_after_first_retry() {
+        let action = decide_recovery_typed(&typed(FailureKind::TaskTooLarge), 1, &policy());
+        assert!(matches!(action, RecoveryAction::Escalate { .. }));
+    }
+
+    #[test]
+    fn missing_dependency_cancels() {
+        let action = decide_recovery_typed(&typed(FailureKind::MissingDependency), 0, &policy());
+        assert!(matches!(action, RecoveryAction::Cancel { .. }));
+    }
+
+    #[test]
+    fn execution_incomplete_retries_within_limit() {
+        let action = decide_recovery_typed(&typed(FailureKind::ExecutionIncomplete), 0, &policy());
+        assert!(matches!(action, RecoveryAction::Retry { .. }));
+
+        let action = decide_recovery_typed(&typed(FailureKind::ExecutionIncomplete), 1, &policy());
+        assert!(matches!(action, RecoveryAction::Retry { .. }));
+    }
+
+    #[test]
+    fn execution_incomplete_escalates_at_limit() {
+        // max_retries default is 2
+        let action = decide_recovery_typed(&typed(FailureKind::ExecutionIncomplete), 2, &policy());
+        assert!(matches!(action, RecoveryAction::Escalate { .. }));
+    }
+
+    #[test]
+    fn minor_defect_retries_once() {
+        let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 0, &policy());
+        match action {
+            RecoveryAction::Retry { narrowed_scope, .. } => {
+                // repair loop — no scope narrowing
+                assert!(
+                    narrowed_scope.is_none(),
+                    "MinorDefect repair retry should not narrow scope"
+                );
+            }
+            other => panic!("expected Retry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn minor_defect_escalates_after_repair_attempt() {
+        let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 1, &policy());
+        assert!(matches!(action, RecoveryAction::Escalate { .. }));
     }
 
     // -- escalate_tier_on_retry -----------------------------------------------

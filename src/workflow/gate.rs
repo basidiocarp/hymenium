@@ -262,11 +262,11 @@ mod tests {
             .with_metadata("key1", "value1")
             .with_metadata("key2", "value2");
         assert_eq!(
-            context.metadata.get("key1").map(|s| s.as_str()),
+            context.metadata.get("key1").map(String::as_str),
             Some("value1")
         );
         assert_eq!(
-            context.metadata.get("key2").map(|s| s.as_str()),
+            context.metadata.get("key2").map(String::as_str),
             Some("value2")
         );
     }

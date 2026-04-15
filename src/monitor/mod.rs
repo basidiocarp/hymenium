@@ -235,6 +235,7 @@ pub(super) mod test_helpers {
             status: status.to_string(),
             agent_id: Some("agent-1".to_string()),
             parent_id: None,
+            required_capabilities: Vec::new(),
         }
     }
 

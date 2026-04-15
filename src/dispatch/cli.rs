@@ -36,6 +36,86 @@ impl CliCanopyClient {
     }
 }
 
+impl CliCanopyClient {
+    /// Build the CLI args for `task create` (top-level task).
+    ///
+    /// Returns owned `String`s so the caller controls lifetimes.
+    pub(crate) fn build_create_task_args(
+        title: &str,
+        description: &str,
+        project_root: &str,
+        options: &TaskOptions,
+    ) -> Vec<String> {
+        let mut args = vec![
+            "task".to_string(),
+            "create".to_string(),
+            "--title".to_string(),
+            title.to_string(),
+            "--description".to_string(),
+            description.to_string(),
+            "--project-root".to_string(),
+            project_root.to_string(),
+        ];
+        if let Some(ref role) = options.required_role {
+            args.push("--required-role".to_string());
+            args.push(role.to_string());
+        }
+        if let Some(ref tier) = options.required_tier {
+            args.push("--required-tier".to_string());
+            args.push(tier.to_string());
+        }
+        if options.verification_required {
+            args.push("--verification-required".to_string());
+        }
+        // Pass capability requirements as a comma-separated list matching canopy's
+        // --required-capabilities flag (value_delimiter = ',').
+        if !options.required_capabilities.is_empty() {
+            args.push("--required-capabilities".to_string());
+            args.push(options.required_capabilities.join(","));
+        }
+        args
+    }
+
+    /// Build the CLI args for `task create --parent` (subtask).
+    ///
+    /// Returns owned `String`s so the caller controls lifetimes.
+    pub(crate) fn build_create_subtask_args(
+        parent_id: &str,
+        title: &str,
+        description: &str,
+        options: &TaskOptions,
+    ) -> Vec<String> {
+        let mut args = vec![
+            "task".to_string(),
+            "create".to_string(),
+            "--parent".to_string(),
+            parent_id.to_string(),
+            "--title".to_string(),
+            title.to_string(),
+            "--description".to_string(),
+            description.to_string(),
+        ];
+        if let Some(ref role) = options.required_role {
+            args.push("--required-role".to_string());
+            args.push(role.to_string());
+        }
+        if let Some(ref tier) = options.required_tier {
+            args.push("--required-tier".to_string());
+            args.push(tier.to_string());
+        }
+        if options.verification_required {
+            args.push("--verification-required".to_string());
+        }
+        // Pass capability requirements as a comma-separated list matching canopy's
+        // --required-capabilities flag (value_delimiter = ',').
+        if !options.required_capabilities.is_empty() {
+            args.push("--required-capabilities".to_string());
+            args.push(options.required_capabilities.join(","));
+        }
+        args
+    }
+}
+
 impl CanopyClient for CliCanopyClient {
     fn create_task(
         &self,
@@ -44,31 +124,8 @@ impl CanopyClient for CliCanopyClient {
         project_root: &str,
         options: &TaskOptions,
     ) -> Result<String, DispatchError> {
-        let mut args = vec![
-            "task",
-            "create",
-            "--title",
-            title,
-            "--description",
-            description,
-            "--project-root",
-            project_root,
-        ];
-        let role_str;
-        if let Some(ref role) = options.required_role {
-            role_str = role.to_string();
-            args.push("--required-role");
-            args.push(&role_str);
-        }
-        let tier_str;
-        if let Some(ref tier) = options.required_tier {
-            tier_str = tier.to_string();
-            args.push("--required-tier");
-            args.push(&tier_str);
-        }
-        if options.verification_required {
-            args.push("--verification-required");
-        }
+        let owned = Self::build_create_task_args(title, description, project_root, options);
+        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
         self.run(&args)
     }
 
@@ -79,31 +136,8 @@ impl CanopyClient for CliCanopyClient {
         description: &str,
         options: &TaskOptions,
     ) -> Result<String, DispatchError> {
-        let mut args = vec![
-            "task",
-            "create",
-            "--parent",
-            parent_id,
-            "--title",
-            title,
-            "--description",
-            description,
-        ];
-        let role_str;
-        if let Some(ref role) = options.required_role {
-            role_str = role.to_string();
-            args.push("--required-role");
-            args.push(&role_str);
-        }
-        let tier_str;
-        if let Some(ref tier) = options.required_tier {
-            tier_str = tier.to_string();
-            args.push("--required-tier");
-            args.push(&tier_str);
-        }
-        if options.verification_required {
-            args.push("--verification-required");
-        }
+        let owned = Self::build_create_subtask_args(parent_id, title, description, options);
+        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
         self.run(&args)
     }
 
@@ -153,5 +187,70 @@ mod tests {
     fn cli_client_builds() {
         let client = CliCanopyClient::new("canopy");
         assert_eq!(client.canopy_bin, "canopy");
+    }
+
+    fn caps_options(caps: Vec<String>) -> TaskOptions {
+        TaskOptions {
+            required_capabilities: caps,
+            ..Default::default()
+        }
+    }
+
+    // -- create_task arg-builder tests ------------------------------------------
+
+    #[test]
+    fn build_create_task_args_includes_capabilities_flag_when_set() {
+        let options = caps_options(vec!["rust".to_string(), "shell".to_string()]);
+        let args = CliCanopyClient::build_create_task_args("t", "d", ".", &options);
+
+        let pos = args
+            .iter()
+            .position(|a| a == "--required-capabilities")
+            .expect("--required-capabilities should be present");
+        assert_eq!(
+            args.get(pos + 1).map(String::as_str),
+            Some("rust,shell"),
+            "capabilities value should follow the flag immediately"
+        );
+    }
+
+    #[test]
+    fn build_create_task_args_omits_capabilities_flag_when_empty() {
+        let options = caps_options(vec![]);
+        let args = CliCanopyClient::build_create_task_args("t", "d", ".", &options);
+
+        assert!(
+            !args.iter().any(|a| a == "--required-capabilities"),
+            "--required-capabilities must not appear when capabilities are empty"
+        );
+    }
+
+    // -- create_subtask arg-builder tests ---------------------------------------
+
+    #[test]
+    fn build_create_subtask_args_includes_capabilities_flag_when_set() {
+        let options = caps_options(vec!["rust".to_string(), "shell".to_string()]);
+        let args = CliCanopyClient::build_create_subtask_args("parent-1", "t", "d", &options);
+
+        let pos = args
+            .iter()
+            .position(|a| a == "--required-capabilities")
+            .expect("--required-capabilities should be present");
+        assert_eq!(
+            args.get(pos + 1).map(String::as_str),
+            Some("rust,shell"),
+            "capabilities value should follow the flag immediately"
+        );
+    }
+
+    #[test]
+    fn build_create_subtask_args_omits_capabilities_flag_when_empty() {
+        let options = caps_options(vec![]);
+        let args = CliCanopyClient::build_create_subtask_args("parent-1", "t", "d", &options);
+
+        assert!(
+            !args.iter().any(|a| a == "--required-capabilities"),
+            "--required-capabilities must not appear when capabilities are empty"
+        );
     }
 }

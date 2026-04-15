@@ -30,6 +30,8 @@ pub enum WorkflowError {
 pub type WorkflowEngineResult<T> = Result<T, WorkflowError>;
 
 /// Status of a running workflow.
+///
+/// Matches the `workflow-status-v1` septa contract wire format exactly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -37,7 +39,10 @@ pub enum WorkflowStatus {
     Pending,
     Dispatched,
     InProgress,
-    Blocked,
+    /// A gate condition blocked the workflow. See `WorkflowInstance::blocked_on`.
+    BlockedOnGate,
+    /// Phase output failed verification and is queued for repair.
+    AwaitingRepair,
     Completed,
     Failed,
     Cancelled,
@@ -49,7 +54,8 @@ impl std::fmt::Display for WorkflowStatus {
             WorkflowStatus::Pending => write!(f, "pending"),
             WorkflowStatus::Dispatched => write!(f, "dispatched"),
             WorkflowStatus::InProgress => write!(f, "in_progress"),
-            WorkflowStatus::Blocked => write!(f, "blocked"),
+            WorkflowStatus::BlockedOnGate => write!(f, "blocked_on_gate"),
+            WorkflowStatus::AwaitingRepair => write!(f, "awaiting_repair"),
             WorkflowStatus::Completed => write!(f, "completed"),
             WorkflowStatus::Failed => write!(f, "failed"),
             WorkflowStatus::Cancelled => write!(f, "cancelled"),
@@ -84,25 +90,30 @@ impl std::fmt::Display for PhaseStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhaseState {
     pub phase_id: String,
+    /// Runtime role for this phase, as defined by the workflow template.
+    pub role: crate::workflow::template::AgentRole,
     pub status: PhaseStatus,
     pub agent_id: Option<String>,
     pub canopy_task_id: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub failure_reason: Option<String>,
+    pub retry_count: u32,
 }
 
 impl PhaseState {
     /// Create a new pending phase state.
-    fn new(phase_id: impl Into<String>) -> Self {
+    fn new(phase_id: impl Into<String>, role: crate::workflow::template::AgentRole) -> Self {
         Self {
             phase_id: phase_id.into(),
+            role,
             status: PhaseStatus::Pending,
             agent_id: None,
             canopy_task_id: None,
             started_at: None,
             completed_at: None,
             failure_reason: None,
+            retry_count: 0,
         }
     }
 
@@ -141,6 +152,8 @@ pub struct WorkflowInstance {
     pub template: WorkflowTemplate,
     pub handoff_path: String,
     pub status: WorkflowStatus,
+    /// When `status` is `BlockedOnGate`, holds the failing gate condition name.
+    pub blocked_on: Option<String>,
     pub current_phase_idx: usize,
     pub phase_states: Vec<PhaseState>,
     pub transitions: Vec<PhaseTransition>,
@@ -159,7 +172,7 @@ impl WorkflowInstance {
         let phase_states = template
             .phases
             .iter()
-            .map(|phase| PhaseState::new(&phase.phase_id))
+            .map(|phase| PhaseState::new(&phase.phase_id, phase.role.clone()))
             .collect();
 
         Self {
@@ -167,6 +180,7 @@ impl WorkflowInstance {
             template,
             handoff_path: handoff_path.into(),
             status: WorkflowStatus::Pending,
+            blocked_on: None,
             current_phase_idx: 0,
             phase_states,
             transitions: Vec::new(),
@@ -233,6 +247,15 @@ impl WorkflowInstance {
     }
 
     /// Fail the current phase. Only active phases can be failed.
+    ///
+    /// # Outcome emission
+    ///
+    /// This method only mutates in-memory state. The caller is responsible for
+    /// persisting a terminal [`crate::outcome::WorkflowOutcome`] via
+    /// `WorkflowStore::insert_outcome` after this method returns and the
+    /// instance status is `WorkflowStatus::Failed`. Production callers in
+    /// `commands/fail.rs` wrap this method and persist the terminal outcome.
+    /// Tests that stop here are not subject to that requirement.
     pub fn fail_phase(&mut self, reason: impl Into<String>) -> WorkflowEngineResult<()> {
         let phase = self
             .current_phase_mut()
@@ -378,6 +401,15 @@ impl WorkflowInstance {
     }
 
     /// Complete the workflow after the final phase is done.
+    ///
+    /// # Outcome emission
+    ///
+    /// This method only mutates in-memory state. The caller is responsible for
+    /// persisting a terminal [`crate::outcome::WorkflowOutcome`] via
+    /// `WorkflowStore::insert_outcome` after this method returns and the
+    /// instance status is `WorkflowStatus::Completed`. Production callers in
+    /// `commands/complete.rs` wrap this method and persist the terminal outcome.
+    /// Tests that stop here are not subject to that requirement.
     pub fn complete_workflow(&mut self) -> WorkflowEngineResult<()> {
         let current = self
             .current_phase()
@@ -609,6 +641,14 @@ mod tests {
     fn test_workflow_status_display() {
         assert_eq!(format!("{}", WorkflowStatus::Pending), "pending");
         assert_eq!(format!("{}", WorkflowStatus::InProgress), "in_progress");
+        assert_eq!(
+            format!("{}", WorkflowStatus::BlockedOnGate),
+            "blocked_on_gate"
+        );
+        assert_eq!(
+            format!("{}", WorkflowStatus::AwaitingRepair),
+            "awaiting_repair"
+        );
         assert_eq!(format!("{}", WorkflowStatus::Completed), "completed");
     }
 

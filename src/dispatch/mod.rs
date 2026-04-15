@@ -4,15 +4,18 @@
 //! only outbound write surface to canopy — it creates tasks, assigns agents,
 //! and checks completeness, but never accesses canopy's database directly.
 
+pub mod capability;
 mod cli;
 mod mock;
 mod orchestrate;
+pub mod task_packet;
 
 // Re-export everything that was public in the original dispatch.rs so external
 // callers see no change.
 pub use cli::CliCanopyClient;
 pub use mock::MockCanopyClient;
 pub use orchestrate::{agent_name, dispatch_workflow, handoff_slug};
+pub use task_packet::{CapabilityRequirements, ContextBudget, TaskPacket};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -61,6 +64,11 @@ pub struct TaskOptions {
     pub required_role: Option<crate::workflow::template::AgentRole>,
     pub required_tier: Option<crate::workflow::template::AgentTier>,
     pub verification_required: bool,
+    /// Capability labels the claiming agent must possess.
+    ///
+    /// Drawn from the shared vocabulary in `dispatch/capability.rs`.
+    /// An empty list means any agent can claim the task (backward-compatible).
+    pub required_capabilities: Vec<String>,
 }
 
 /// Detail record for a canopy task.
@@ -71,6 +79,9 @@ pub struct TaskDetail {
     pub status: String,
     pub agent_id: Option<String>,
     pub parent_id: Option<String>,
+    /// Capability requirements recorded at task-create time (empty = any agent).
+    #[serde(default)]
+    pub required_capabilities: Vec<String>,
 }
 
 /// Report from a completeness check on a handoff.

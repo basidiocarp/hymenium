@@ -20,14 +20,14 @@ fn test_crate_scaffold_handoff() {
     assert!(metadata.allowed_write_scope[0].contains("hymenium"));
 
     // Verify problem section
-    assert!(handoff.problem.len() > 0);
+    assert!(!handoff.problem.is_empty());
     assert!(handoff.problem.contains("Hymenium"));
 
     // Verify state items
     assert!(!handoff.state.is_empty());
 
     // Verify intent
-    assert!(handoff.intent.len() > 0);
+    assert!(!handoff.intent.is_empty());
 
     // Verify steps were extracted
     assert!(!handoff.steps.is_empty());
@@ -121,13 +121,13 @@ fn test_old_format_handoff_without_metadata() {
     assert!(handoff.metadata.is_none());
 
     // Verify problem section exists
-    assert!(handoff.problem.len() > 0);
+    assert!(!handoff.problem.is_empty());
 
     // Verify state section
     assert!(!handoff.state.is_empty());
 
     // Verify intent
-    assert!(handoff.intent.len() > 0);
+    assert!(!handoff.intent.is_empty());
 
     // Verify steps were extracted
     assert!(!handoff.steps.is_empty());
@@ -201,9 +201,9 @@ fn test_context_section_extracted() {
     let handoff = parse_handoff(content).unwrap();
 
     assert!(handoff.context.is_some());
-    let context = handoff.context.unwrap();
-    assert!(context.len() > 0);
-    assert!(context.contains("#118"));
+    let context_text = handoff.context.unwrap();
+    assert!(!context_text.is_empty());
+    assert!(context_text.contains("#118"));
 }
 
 #[test]

@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn sanitize_inserts_stub_after_removed_prefix_messages() {
-        let messages = vec![
+        let messages = [
             ContextMessage::text("msg-1", ContextMessageRole::User, "prefix"),
             ContextMessage::tool_call("call-1", "search", "call"),
         ];
