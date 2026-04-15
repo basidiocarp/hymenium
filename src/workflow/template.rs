@@ -273,7 +273,7 @@ pub fn load_from_json(json: &str) -> TemplateResult<WorkflowTemplate> {
 /// Get the built-in implementer/auditor workflow template.
 pub fn impl_audit_default() -> WorkflowTemplate {
     WorkflowTemplate {
-        schema_version: "1.0".to_string(),
+        schema_version: "1.1".to_string(),
         template_id: "impl-audit".to_string(),
         name: "Implementer/Auditor".to_string(),
         description: "Two-phase workflow for implementation handoffs with post-implementation audit. \
