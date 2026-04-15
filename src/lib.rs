@@ -3,6 +3,7 @@
 //! This crate provides the core workflow engine for decomposing, dispatching,
 //! monitoring, and coordinating work across distributed agents.
 
+pub mod context;
 pub mod decompose;
 pub mod dispatch;
 pub mod monitor;

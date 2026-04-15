@@ -15,6 +15,7 @@ use std::collections::HashMap;
 #[derive(Debug)]
 pub struct MockCanopyClient {
     tasks: RefCell<HashMap<String, TaskDetail>>,
+    descriptions: RefCell<HashMap<String, String>>,
     next_id: RefCell<u64>,
     default_completeness: CompletenessReport,
 }
@@ -24,6 +25,7 @@ impl MockCanopyClient {
     pub fn new() -> Self {
         Self {
             tasks: RefCell::new(HashMap::new()),
+            descriptions: RefCell::new(HashMap::new()),
             next_id: RefCell::new(1),
             default_completeness: CompletenessReport {
                 complete: true,
@@ -48,6 +50,11 @@ impl MockCanopyClient {
     /// Look up a task in the internal store (test helper).
     pub fn stored_task(&self, id: &str) -> Option<TaskDetail> {
         self.tasks.borrow().get(id).cloned()
+    }
+
+    /// Look up the stored task description in the mock client.
+    pub fn stored_description(&self, id: &str) -> Option<String> {
+        self.descriptions.borrow().get(id).cloned()
     }
 
     fn next_task_id(&self) -> String {
@@ -81,7 +88,9 @@ impl CanopyClient for MockCanopyClient {
             parent_id: None,
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
-        let _ = description; // description not stored in mock — check title in tests
+        self.descriptions
+            .borrow_mut()
+            .insert(task_id.clone(), description.to_string());
         Ok(task_id)
     }
 
@@ -106,7 +115,9 @@ impl CanopyClient for MockCanopyClient {
             parent_id: Some(parent_id.to_string()),
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
-        let _ = description;
+        self.descriptions
+            .borrow_mut()
+            .insert(task_id.clone(), description.to_string());
         Ok(task_id)
     }
 
@@ -146,6 +157,9 @@ impl CanopyClient for MockCanopyClient {
             parent_id: None,
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
+        self.descriptions
+            .borrow_mut()
+            .insert(task_id.clone(), "imported handoff".to_string());
         Ok(ImportResult {
             task_id,
             subtask_ids: Vec::new(),

@@ -1,9 +1,15 @@
 use super::{CanopyClient, DispatchError, TaskOptions};
+use crate::context::{
+    estimate_text_tokens, BudgetContextEngine, CompressionParams, ContextEngine, ContextMessage,
+    ContextMessageRole,
+};
 use crate::parser::ParsedHandoff;
 use crate::workflow::engine::WorkflowInstance;
 use crate::workflow::template::AgentRole;
 use crate::workflow::template::WorkflowTemplate;
 use crate::workflow::WorkflowId;
+
+const DISPATCH_CONTEXT_TOKEN_BUDGET: usize = 64;
 
 // ---------------------------------------------------------------------------
 // Dispatch orchestration
@@ -48,10 +54,15 @@ pub fn dispatch_workflow(
         ));
     }
 
+    let dispatch_messages = build_dispatch_context_messages(handoff);
+    let focus_topic = dispatch_focus_topic(template);
+    let parent_description =
+        prepare_parent_description(&dispatch_messages, focus_topic.as_deref())?;
+
     // Create the parent canopy task from the handoff.
     let parent_task_id = canopy.create_task(
         &handoff.title,
-        &handoff.problem,
+        &parent_description,
         project_root,
         &TaskOptions::default(),
     )?;
@@ -101,6 +112,107 @@ pub fn dispatch_workflow(
 
     instance.status = crate::workflow::engine::WorkflowStatus::Dispatched;
     Ok(instance)
+}
+
+fn build_dispatch_context_messages(handoff: &ParsedHandoff) -> Vec<ContextMessage> {
+    let mut messages = vec![
+        ContextMessage::text("handoff-title", ContextMessageRole::System, &handoff.title),
+        ContextMessage::text(
+            "handoff-problem",
+            ContextMessageRole::User,
+            &handoff.problem,
+        ),
+        ContextMessage::text(
+            "handoff-intent",
+            ContextMessageRole::Assistant,
+            &handoff.intent,
+        ),
+    ];
+
+    if let Some(context) = handoff.context.as_ref() {
+        messages.push(ContextMessage::text(
+            "handoff-context",
+            ContextMessageRole::User,
+            context,
+        ));
+    }
+
+    for step in &handoff.steps {
+        messages.push(ContextMessage::text(
+            format!("step-{}", step.number),
+            ContextMessageRole::User,
+            format!("Step {}: {}\n{}", step.number, step.title, step.description),
+        ));
+    }
+
+    messages
+}
+
+fn dispatch_focus_topic(template: &WorkflowTemplate) -> Option<String> {
+    template
+        .phases
+        .first()
+        .map(|phase| format!("{} {}", phase.phase_id, phase.role))
+}
+
+fn prepare_parent_description(
+    dispatch_messages: &[ContextMessage],
+    focus_topic: Option<&str>,
+) -> Result<String, DispatchError> {
+    let initial = render_context(dispatch_messages, false);
+    if estimate_text_tokens(&initial) <= DISPATCH_CONTEXT_TOKEN_BUDGET {
+        return Ok(initial);
+    }
+
+    let engine = BudgetContextEngine;
+    let params = CompressionParams {
+        focus_topic: focus_topic.map(std::string::ToString::to_string),
+        token_budget: DISPATCH_CONTEXT_TOKEN_BUDGET,
+    };
+    let compressed = engine
+        .compress(dispatch_messages, &params)
+        .map_err(|error| {
+            DispatchError::InvalidState(format!("context compression failed: {error}"))
+        })?;
+
+    Ok(truncate_rendered_context(
+        &render_context(&compressed.messages, true),
+        DISPATCH_CONTEXT_TOKEN_BUDGET,
+    ))
+}
+
+fn render_context(messages: &[ContextMessage], compressed: bool) -> String {
+    let mut out = String::new();
+    if compressed {
+        out.push_str("Compressed context:\n");
+    }
+    for message in messages {
+        out.push_str("- ");
+        out.push_str(role_label(message.role));
+        out.push_str(": ");
+        out.push_str(&message.content);
+        out.push('\n');
+    }
+    out.trim().to_string()
+}
+
+fn role_label(role: ContextMessageRole) -> &'static str {
+    match role {
+        ContextMessageRole::System => "system",
+        ContextMessageRole::User => "user",
+        ContextMessageRole::Assistant => "assistant",
+        ContextMessageRole::ToolCall => "tool_call",
+        ContextMessageRole::ToolResult => "tool_result",
+    }
+}
+
+fn truncate_rendered_context(text: &str, token_budget: usize) -> String {
+    let words = text.split_whitespace().collect::<Vec<_>>();
+    if words.len() <= token_budget {
+        return text.to_string();
+    }
+
+    words[..token_budget].join(" ")
 }
 
 // ---------------------------------------------------------------------------
@@ -405,5 +517,43 @@ mod tests {
             agent.starts_with("implementer/hymenium/"),
             "agent name was: {agent}"
         );
+    }
+
+    #[test]
+    fn dispatch_focus_topic_uses_first_phase_target() {
+        let template = impl_audit_default();
+
+        assert_eq!(
+            dispatch_focus_topic(&template).as_deref(),
+            Some("implement implementer")
+        );
+    }
+
+    #[test]
+    fn dispatch_compresses_when_context_budget_is_exceeded() {
+        let mock = MockCanopyClient::new();
+        let template = impl_audit_default();
+        let mut handoff = test_handoff();
+        handoff.problem = "problem ".repeat(40);
+        handoff.intent = "intent ".repeat(30);
+        handoff.context = Some("background context".to_string());
+        handoff.steps[0].description = "implement target ".repeat(40);
+
+        let instance = dispatch_workflow(
+            &handoff,
+            &template,
+            WorkflowId("wf-compress".to_string()),
+            &mock,
+        )
+        .expect("dispatch should succeed");
+
+        let description = mock
+            .stored_description("mock-task-1")
+            .expect("parent description should be stored");
+        assert!(description.contains("Compressed context"));
+        assert!(description.contains("implement"));
+        assert!(!description.contains("problem problem problem problem problem problem problem problem problem problem problem problem"));
+        assert!(estimate_text_tokens(&description) <= DISPATCH_CONTEXT_TOKEN_BUDGET);
+        assert_eq!(instance.phase_states.len(), 2);
     }
 }

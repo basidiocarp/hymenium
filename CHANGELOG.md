@@ -4,6 +4,22 @@ All notable changes to Hymenium are documented in this file.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-14
+
+### Added
+
+- **Context compression pipeline**: Hymenium now exposes a pluggable
+  `ContextEngine` with budget-aware pruning, focus-topic biasing, and
+  tool-pair sanitization.
+
+### Fixed
+
+- **Dispatch overflow handling**: dispatch now retries with compressed context
+  when the rendered parent-task surface exceeds budget instead of re-expanding
+  the original payload.
+- **Verifier reliability**: the context compression handoff verifier now runs
+  to completion under `set -e`.
+
 ## [0.1.1] - 2026-04-14
 
 ### Fixed
