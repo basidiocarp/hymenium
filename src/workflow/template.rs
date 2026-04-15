@@ -77,14 +77,65 @@ impl WorkflowTemplate {
     }
 }
 
+/// Process-level role for a workflow phase.
+///
+/// This is the abstract, user-facing label that is portable across workflow
+/// templates. It maps to a default `AgentRole` via `effective_agent_role()`.
+/// Use `agent_role` on the phase when you need to pin a specific dispatch
+/// catalog agent.
+///
+/// The wire format uses lowercase names (e.g., `"implementer"`) via
+/// `#[serde(rename_all = "lowercase")]`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum ProcessRole {
+    Implementer,
+    Auditor,
+    Reviewer,
+    Operator,
+}
+
+impl std::fmt::Display for ProcessRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessRole::Implementer => write!(f, "implementer"),
+            ProcessRole::Auditor => write!(f, "auditor"),
+            ProcessRole::Reviewer => write!(f, "reviewer"),
+            ProcessRole::Operator => write!(f, "operator"),
+        }
+    }
+}
+
 /// Represents a single phase within a workflow template.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Phase {
     pub phase_id: String,
-    pub role: AgentRole,
+    /// Abstract process role for this phase (portable, user-facing).
+    pub role: ProcessRole,
+    /// Optional dispatch catalog agent. When set, pins the phase to a specific
+    /// agent. When absent, dispatch resolves the agent from `role` via
+    /// `effective_agent_role()`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_role: Option<AgentRole>,
     pub agent_tier: AgentTier,
     pub entry_gate: Gate,
     pub exit_gate: Gate,
+}
+
+impl Phase {
+    /// Returns the concrete dispatch role for this phase.
+    ///
+    /// Uses `agent_role` when explicitly set; falls back to a default derived
+    /// from the process role.
+    pub fn effective_agent_role(&self) -> AgentRole {
+        self.agent_role.clone().unwrap_or(match self.role {
+            ProcessRole::Implementer => AgentRole::Worker,
+            ProcessRole::Auditor => AgentRole::OutputVerifier,
+            ProcessRole::Reviewer => AgentRole::FinalVerifier,
+            ProcessRole::Operator => AgentRole::WorkflowCoordinator,
+        })
+    }
 }
 
 /// Represents gate conditions for phase entry or exit.
@@ -233,7 +284,8 @@ pub fn impl_audit_default() -> WorkflowTemplate {
         phases: vec![
             Phase {
                 phase_id: "implement".to_string(),
-                role: AgentRole::Worker,
+                role: ProcessRole::Implementer,
+                agent_role: Some(AgentRole::Worker),
                 agent_tier: AgentTier::Sonnet,
                 entry_gate: Gate {
                     requires: vec![],
@@ -247,7 +299,8 @@ pub fn impl_audit_default() -> WorkflowTemplate {
             },
             Phase {
                 phase_id: "audit".to_string(),
-                role: AgentRole::OutputVerifier,
+                role: ProcessRole::Auditor,
+                agent_role: Some(AgentRole::OutputVerifier),
                 agent_tier: AgentTier::Sonnet,
                 entry_gate: Gate {
                     requires: vec![
@@ -275,21 +328,23 @@ mod tests {
     #[test]
     fn test_load_from_json_septa_fixture() {
         let json = r#"{
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "template_id": "impl-audit",
             "name": "Implementer/Auditor",
             "description": "Two-phase workflow",
             "phases": [
                 {
                     "phase_id": "implement",
-                    "role": "Worker",
+                    "role": "implementer",
+                    "agent_role": "Worker",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
                     "exit_gate": {"requires": ["code_diff_exists", "verification_passed"]}
                 },
                 {
                     "phase_id": "audit",
-                    "role": "Output Verifier",
+                    "role": "auditor",
+                    "agent_role": "Output Verifier",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": ["code_diff_exists", "verification_passed"]},
                     "exit_gate": {"requires": ["audit_clean", "findings_resolved"]}
@@ -308,6 +363,13 @@ mod tests {
         assert_eq!(template.template_id, "impl-audit");
         assert_eq!(template.phases.len(), 2);
         assert_eq!(template.transitions.len(), 1);
+        assert_eq!(template.phases[0].role, ProcessRole::Implementer);
+        assert_eq!(template.phases[0].agent_role, Some(AgentRole::Worker));
+        assert_eq!(template.phases[1].role, ProcessRole::Auditor);
+        assert_eq!(
+            template.phases[1].agent_role,
+            Some(AgentRole::OutputVerifier)
+        );
     }
 
     #[test]
@@ -323,14 +385,14 @@ mod tests {
     #[test]
     fn test_invalid_phase_reference_rejected() {
         let json = r#"{
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "template_id": "bad-template",
             "name": "Bad Template",
             "description": "Invalid transitions",
             "phases": [
                 {
                     "phase_id": "phase1",
-                    "role": "Worker",
+                    "role": "implementer",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
                     "exit_gate": {"requires": []}
@@ -356,21 +418,21 @@ mod tests {
     #[test]
     fn test_duplicate_phase_id_rejected() {
         let json = r#"{
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "template_id": "bad-template",
             "name": "Bad Template",
             "description": "Duplicate phases",
             "phases": [
                 {
                     "phase_id": "phase1",
-                    "role": "Worker",
+                    "role": "implementer",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
                     "exit_gate": {"requires": []}
                 },
                 {
                     "phase_id": "phase1",
-                    "role": "Output Verifier",
+                    "role": "auditor",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
                     "exit_gate": {"requires": []}
@@ -390,7 +452,7 @@ mod tests {
     #[test]
     fn test_missing_required_fields() {
         let json = r#"{
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "template_id": "bad-template",
             "name": "Bad Template",
             "phases": [],
@@ -426,7 +488,8 @@ mod tests {
 
     #[test]
     fn test_impl_audit_roles_match_reset_contract() {
-        // Proves the impl-audit template uses only septa workflow-status-v1 role names.
+        // Proves that the effective dispatch agent roles for impl-audit use only
+        // septa workflow-status-v1 role names.
         let template = impl_audit_default();
         let allowed = [
             "Spec Author",
@@ -440,17 +503,93 @@ mod tests {
             "Final Verifier",
         ];
         for phase in &template.phases {
-            let role_str = phase.role.to_string();
+            let role_str = phase.effective_agent_role().to_string();
             assert!(
                 allowed.contains(&role_str.as_str()),
-                "phase '{}' has role '{}' not in the allowed septa set",
+                "phase '{}' has effective_agent_role '{}' not in the allowed septa set",
                 phase.phase_id,
                 role_str
             );
         }
-        // Verify the specific assignments.
-        assert_eq!(template.phases[0].role, AgentRole::Worker);
-        assert_eq!(template.phases[1].role, AgentRole::OutputVerifier);
+        // Verify the process roles.
+        assert_eq!(template.phases[0].role, ProcessRole::Implementer);
+        assert_eq!(template.phases[1].role, ProcessRole::Auditor);
+        // Verify the explicit agent_role pins.
+        assert_eq!(template.phases[0].agent_role, Some(AgentRole::Worker));
+        assert_eq!(
+            template.phases[1].agent_role,
+            Some(AgentRole::OutputVerifier)
+        );
+        // Verify effective dispatch roles match agent_role when set.
+        assert_eq!(template.phases[0].effective_agent_role(), AgentRole::Worker);
+        assert_eq!(
+            template.phases[1].effective_agent_role(),
+            AgentRole::OutputVerifier
+        );
+    }
+
+    #[test]
+    fn test_process_role_display() {
+        assert_eq!(format!("{}", ProcessRole::Implementer), "implementer");
+        assert_eq!(format!("{}", ProcessRole::Auditor), "auditor");
+        assert_eq!(format!("{}", ProcessRole::Reviewer), "reviewer");
+        assert_eq!(format!("{}", ProcessRole::Operator), "operator");
+    }
+
+    #[test]
+    fn test_effective_agent_role_fallback() {
+        // When agent_role is None, effective_agent_role falls back from ProcessRole.
+        let phase_no_agent_role = Phase {
+            phase_id: "test".to_string(),
+            role: ProcessRole::Implementer,
+            agent_role: None,
+            agent_tier: AgentTier::Sonnet,
+            entry_gate: Gate { requires: vec![] },
+            exit_gate: Gate { requires: vec![] },
+        };
+        assert_eq!(
+            phase_no_agent_role.effective_agent_role(),
+            AgentRole::Worker
+        );
+
+        let phase_auditor = Phase {
+            phase_id: "test".to_string(),
+            role: ProcessRole::Auditor,
+            agent_role: None,
+            agent_tier: AgentTier::Sonnet,
+            entry_gate: Gate { requires: vec![] },
+            exit_gate: Gate { requires: vec![] },
+        };
+        assert_eq!(
+            phase_auditor.effective_agent_role(),
+            AgentRole::OutputVerifier
+        );
+
+        let phase_reviewer = Phase {
+            phase_id: "test".to_string(),
+            role: ProcessRole::Reviewer,
+            agent_role: None,
+            agent_tier: AgentTier::Sonnet,
+            entry_gate: Gate { requires: vec![] },
+            exit_gate: Gate { requires: vec![] },
+        };
+        assert_eq!(
+            phase_reviewer.effective_agent_role(),
+            AgentRole::FinalVerifier
+        );
+
+        let phase_operator = Phase {
+            phase_id: "test".to_string(),
+            role: ProcessRole::Operator,
+            agent_role: None,
+            agent_tier: AgentTier::Sonnet,
+            entry_gate: Gate { requires: vec![] },
+            exit_gate: Gate { requires: vec![] },
+        };
+        assert_eq!(
+            phase_operator.effective_agent_role(),
+            AgentRole::WorkflowCoordinator
+        );
     }
 
     #[test]

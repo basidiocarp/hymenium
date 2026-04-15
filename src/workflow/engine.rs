@@ -172,7 +172,7 @@ impl WorkflowInstance {
         let phase_states = template
             .phases
             .iter()
-            .map(|phase| PhaseState::new(&phase.phase_id, phase.role.clone()))
+            .map(|phase| PhaseState::new(&phase.phase_id, phase.effective_agent_role()))
             .collect();
 
         Self {

@@ -10,7 +10,9 @@ pub mod template;
 // Re-export commonly used types
 pub use engine::{PhaseState, PhaseStatus, PhaseTransition, WorkflowInstance, WorkflowStatus};
 pub use gate::{GateCondition, GateContext, GateEvaluation, GateEvaluator, MockGateEvaluator};
-pub use template::{AgentRole, AgentTier, Gate, Phase, TemplateRegistry, WorkflowTemplate};
+pub use template::{
+    AgentRole, AgentTier, Gate, Phase, ProcessRole, TemplateRegistry, WorkflowTemplate,
+};
 
 /// Strongly-typed workflow identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

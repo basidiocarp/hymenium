@@ -130,7 +130,7 @@ pub fn dispatch_workflow(
         );
 
         let options = TaskOptions {
-            required_role: Some(phase.role.clone()),
+            required_role: phase.agent_role.clone(),
             required_tier: Some(phase.agent_tier.clone()),
             verification_required: !phase.exit_gate.requires.is_empty(),
             required_capabilities: repo_required_capabilities.clone(),
@@ -143,7 +143,7 @@ pub fn dispatch_workflow(
 
     // Assign the first phase's agent automatically.
     if let Some(first_phase) = template.phases.first() {
-        let agent = agent_name(&first_phase.role, repo_name, &slug, 1);
+        let agent = agent_name(&first_phase.effective_agent_role(), repo_name, &slug, 1);
         if let Some(first_state) = instance.phase_states.first() {
             if let Some(ref task_id) = first_state.canopy_task_id {
                 canopy.assign_task(task_id, &agent)?;
@@ -603,7 +603,7 @@ mod tests {
 
         assert_eq!(
             dispatch_focus_topic(&template).as_deref(),
-            Some("implement Worker")
+            Some("implement implementer")
         );
     }
 
