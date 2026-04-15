@@ -31,6 +31,9 @@ pub enum MonitorError {
 
     #[error("phase not active: {0}")]
     PhaseNotActive(String),
+
+    #[error("invalid monitor config: {field} — {reason}")]
+    InvalidConfig { field: String, reason: String },
 }
 
 // ---------------------------------------------------------------------------

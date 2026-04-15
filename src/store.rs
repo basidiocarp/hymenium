@@ -98,7 +98,10 @@ impl WorkflowStore {
         let base = std::env::var("XDG_DATA_HOME").map_or_else(
             |_| {
                 std::env::var("HOME").map_or_else(
-                    |_| PathBuf::from("."),
+                    |_| {
+                        eprintln!("warning: neither XDG_DATA_HOME nor HOME is set; writing hymenium.db to ./hymenium/hymenium.db");
+                        PathBuf::from(".")
+                    },
                     |h| PathBuf::from(h).join(".local").join("share"),
                 )
             },
@@ -115,15 +118,16 @@ impl WorkflowStore {
         self.conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS workflows (
-                workflow_id   TEXT PRIMARY KEY,
-                template_id   TEXT NOT NULL,
-                handoff_path  TEXT NOT NULL,
-                status        TEXT NOT NULL,
-                current_phase TEXT,
-                blocked_on    TEXT,
-                created_at    TEXT NOT NULL,
-                updated_at    TEXT NOT NULL,
-                template_json TEXT NOT NULL
+                workflow_id      TEXT PRIMARY KEY,
+                template_id      TEXT NOT NULL,
+                handoff_path     TEXT NOT NULL,
+                status           TEXT NOT NULL,
+                current_phase    TEXT,
+                current_phase_idx INTEGER NOT NULL DEFAULT 0,
+                blocked_on       TEXT,
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL,
+                template_json    TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS phase_states (
@@ -170,18 +174,25 @@ impl WorkflowStore {
     pub fn insert_workflow(&self, inst: &WorkflowInstance) -> Result<(), StoreError> {
         let template_json = serde_json::to_string(&inst.template)?;
         let current_phase = inst.current_phase().map(|p| p.phase_id.as_str());
+        let current_phase_idx =
+            i64::try_from(inst.current_phase_idx).map_err(|_| StoreError::InvalidValue {
+                field: "current_phase_idx",
+                value: inst.current_phase_idx.to_string(),
+                reason: format!("value {} exceeds i64::MAX", inst.current_phase_idx),
+            })?;
 
         self.conn.execute(
             "INSERT INTO workflows
                 (workflow_id, template_id, handoff_path, status, current_phase,
-                 blocked_on, created_at, updated_at, template_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 current_phase_idx, blocked_on, created_at, updated_at, template_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 inst.workflow_id.0,
                 inst.template.template_id,
                 inst.handoff_path,
                 inst.status.to_string(),
                 current_phase,
+                current_phase_idx,
                 inst.blocked_on,
                 inst.created_at.to_rfc3339(),
                 inst.updated_at.to_rfc3339(),
@@ -203,6 +214,7 @@ impl WorkflowStore {
             String,
             String,
             Option<String>,
+            i64,
             Option<String>,
             String,
             String,
@@ -211,7 +223,7 @@ impl WorkflowStore {
 
         let row: Result<Row, _> = self.conn.query_row(
             "SELECT workflow_id, template_id, handoff_path, status, current_phase,
-                    blocked_on, created_at, updated_at, template_json
+                    current_phase_idx, blocked_on, created_at, updated_at, template_json
              FROM workflows WHERE workflow_id = ?1",
             params![id.0],
             |row| {
@@ -220,10 +232,11 @@ impl WorkflowStore {
                     row.get::<_, String>(2)?,         // handoff_path
                     row.get::<_, String>(3)?,         // status
                     row.get::<_, Option<String>>(4)?, // current_phase
-                    row.get::<_, Option<String>>(5)?, // blocked_on
-                    row.get::<_, String>(6)?,         // created_at
-                    row.get::<_, String>(7)?,         // updated_at
-                    row.get::<_, String>(8)?,         // template_json
+                    row.get::<_, i64>(5)?,            // current_phase_idx
+                    row.get::<_, Option<String>>(6)?, // blocked_on
+                    row.get::<_, String>(7)?,         // created_at
+                    row.get::<_, String>(8)?,         // updated_at
+                    row.get::<_, String>(9)?,         // template_json
                 ))
             },
         );
@@ -233,6 +246,7 @@ impl WorkflowStore {
             handoff_path,
             status_str,
             _current_phase,
+            current_phase_idx_i64,
             blocked_on,
             created_at_str,
             updated_at_str,
@@ -248,21 +262,17 @@ impl WorkflowStore {
         let created_at = parse_datetime(&created_at_str, "created_at")?;
         let updated_at = parse_datetime(&updated_at_str, "updated_at")?;
 
-        let phase_states = self.load_phase_states(&WorkflowId(wf_id.clone()))?;
+        let current_phase_idx =
+            usize::try_from(current_phase_idx_i64).map_err(|_| StoreError::InvalidValue {
+                field: "current_phase_idx",
+                value: current_phase_idx_i64.to_string(),
+                reason: format!(
+                    "value {} is negative or exceeds usize::MAX",
+                    current_phase_idx_i64
+                ),
+            })?;
 
-        // Restore current_phase_idx from loaded phase states.
-        let current_phase_idx = phase_states
-            .iter()
-            .position(|p| p.status == PhaseStatus::Active)
-            .or_else(|| {
-                // If no active phase, find the last completed one and use next.
-                // If none completed, default to 0.
-                phase_states
-                    .iter()
-                    .rposition(|p| p.status == PhaseStatus::Completed)
-                    .map(|i| (i + 1).min(phase_states.len().saturating_sub(1)))
-            })
-            .unwrap_or(0);
+        let phase_states = self.load_phase_states(&WorkflowId(wf_id.clone()))?;
 
         Ok(Some(WorkflowInstance {
             workflow_id: WorkflowId(wf_id),
@@ -294,6 +304,29 @@ impl WorkflowStore {
                 Utc::now().to_rfc3339(),
                 id.0,
             ],
+        )?;
+        if updated == 0 {
+            return Err(StoreError::NotFound(id.0.clone()));
+        }
+        Ok(())
+    }
+
+    /// Update the current phase index for a workflow.
+    pub fn update_current_phase_idx(
+        &self,
+        id: &WorkflowId,
+        current_phase_idx: usize,
+    ) -> Result<(), StoreError> {
+        let current_phase_idx_i64 =
+            i64::try_from(current_phase_idx).map_err(|_| StoreError::InvalidValue {
+                field: "current_phase_idx",
+                value: current_phase_idx.to_string(),
+                reason: format!("value {} exceeds i64::MAX", current_phase_idx),
+            })?;
+        let updated = self.conn.execute(
+            "UPDATE workflows SET current_phase_idx = ?1, updated_at = ?2
+             WHERE workflow_id = ?3",
+            params![current_phase_idx_i64, Utc::now().to_rfc3339(), id.0,],
         )?;
         if updated == 0 {
             return Err(StoreError::NotFound(id.0.clone()));
@@ -376,7 +409,11 @@ impl WorkflowStore {
                 state.completed_at.map(|t| t.to_rfc3339()),
                 state.canopy_task_id,
                 state.retry_count,
-                i64::try_from(order).unwrap_or(i64::MAX),
+                i64::try_from(order).map_err(|_| StoreError::InvalidValue {
+                    field: "phase_order",
+                    value: order.to_string(),
+                    reason: format!("value {} exceeds i64::MAX", order),
+                })?,
                 state.failure_reason,
             ],
         )?;
@@ -807,5 +844,99 @@ mod tests {
             )
             .expect("count");
         assert_eq!(count, 1);
+    }
+
+    // -- regression tests for terminal-transition-hardening ------------------
+
+    #[test]
+    fn test_current_phase_idx_persisted_and_loaded() {
+        use crate::workflow::engine::{PhaseState, PhaseStatus};
+
+        let store = temp_store();
+        let mut inst = make_instance("01JNQWF0000000000000000009");
+
+        // Start at phase 0 (implement)
+        assert_eq!(inst.current_phase_idx, 0);
+
+        store.insert_workflow(&inst).expect("insert");
+
+        // Simulate phase 0 completion
+        inst.phase_states[0].status = PhaseStatus::Completed;
+        inst.phase_states[0].completed_at = Some(Utc::now());
+        store
+            .upsert_phase_state(&inst.workflow_id, &inst.phase_states[0], 0)
+            .expect("upsert phase 0");
+
+        // Manually advance to phase 1 (audit)
+        inst.current_phase_idx = 1;
+        inst.phase_states[1].status = PhaseStatus::Active;
+        inst.phase_states[1].started_at = Some(Utc::now());
+        store
+            .upsert_phase_state(&inst.workflow_id, &inst.phase_states[1], 1)
+            .expect("upsert phase 1");
+
+        // Now persist the new current_phase_idx
+        store
+            .update_current_phase_idx(&inst.workflow_id, 1)
+            .expect("update phase idx");
+
+        // Reload and verify current_phase_idx is 1 (from direct read, not heuristic)
+        let loaded = store
+            .get_workflow(&inst.workflow_id)
+            .expect("get")
+            .expect("should exist");
+
+        assert_eq!(
+            loaded.current_phase_idx, 1,
+            "current_phase_idx should be loaded as 1"
+        );
+        assert_eq!(
+            loaded.phase_states[1].status,
+            PhaseStatus::Active,
+            "phase 1 should be active"
+        );
+    }
+
+    #[test]
+    fn test_current_phase_idx_persisted_column_overrides_heuristic() {
+        use crate::workflow::engine::PhaseStatus;
+
+        let store = temp_store();
+        let mut inst = make_instance("01JNQWF0000000000000000010");
+
+        // Insert with current_phase_idx = 0
+        store.insert_workflow(&inst).expect("insert");
+
+        // Manually mark both phases as "completed" (an impossible state that the old
+        // heuristic would mishandle). The heuristic would compute (1 + 1) = 2, then
+        // clamp to len().saturating_sub(1) = 1, which happens to be correct here.
+        // But the persisted current_phase_idx should be the source of truth.
+        inst.phase_states[0].status = PhaseStatus::Completed;
+        inst.phase_states[0].completed_at = Some(Utc::now());
+        store
+            .upsert_phase_state(&inst.workflow_id, &inst.phase_states[0], 0)
+            .expect("upsert phase 0");
+
+        inst.phase_states[1].status = PhaseStatus::Completed;
+        inst.phase_states[1].completed_at = Some(Utc::now());
+        store
+            .upsert_phase_state(&inst.workflow_id, &inst.phase_states[1], 1)
+            .expect("upsert phase 1");
+
+        // Explicitly set current_phase_idx to 1 (the correct value in this scenario).
+        store
+            .update_current_phase_idx(&inst.workflow_id, 1)
+            .expect("update phase idx");
+
+        // Reload and verify we get current_phase_idx = 1 from the persisted column.
+        let loaded = store
+            .get_workflow(&inst.workflow_id)
+            .expect("get")
+            .expect("should exist");
+
+        assert_eq!(
+            loaded.current_phase_idx, 1,
+            "persisted current_phase_idx should override heuristic scanning"
+        );
     }
 }

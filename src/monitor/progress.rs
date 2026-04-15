@@ -61,8 +61,13 @@ pub fn check_progress(
         ))
     })?;
     let elapsed = now.signed_duration_since(started);
-    let heartbeat_elapsed = elapsed
-        > chrono::Duration::from_std(config.heartbeat_timeout).unwrap_or(chrono::Duration::MAX);
+    let heartbeat_timeout = chrono::Duration::from_std(config.heartbeat_timeout).map_err(|e| {
+        MonitorError::InvalidConfig {
+            field: "heartbeat_timeout".into(),
+            reason: format!("{e}"),
+        }
+    })?;
+    let heartbeat_elapsed = elapsed > heartbeat_timeout;
 
     if heartbeat_elapsed && (task.status == "pending" || task.status == "assigned") {
         return Ok(ProgressSignal::Stalled {
@@ -83,8 +88,13 @@ pub fn check_progress(
         });
     }
 
-    let progress_elapsed = elapsed
-        > chrono::Duration::from_std(config.progress_timeout).unwrap_or(chrono::Duration::MAX);
+    let progress_timeout = chrono::Duration::from_std(config.progress_timeout).map_err(|e| {
+        MonitorError::InvalidConfig {
+            field: "progress_timeout".into(),
+            reason: format!("{e}"),
+        }
+    })?;
+    let progress_elapsed = elapsed > progress_timeout;
 
     if progress_elapsed && completeness.completed_items == 0 {
         return Ok(ProgressSignal::Stalled {

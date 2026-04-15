@@ -255,6 +255,9 @@ mod tests {
         store
             .update_workflow_status(&workflow_id, &inst.status, None)
             .expect("update status");
+        store
+            .update_current_phase_idx(&workflow_id, 1)
+            .expect("update current_phase_idx");
         for (order, phase) in inst.phase_states.iter().enumerate() {
             store
                 .upsert_phase_state(&workflow_id, phase, order)
