@@ -42,6 +42,9 @@ pub fn run(workflow_id: &str, reason: &str, store: &WorkflowStore) -> Result<(),
         // Persist the status update.
         txn_store.update_workflow_status(&id, &WorkflowStatus::Failed, None)?;
 
+        // Persist the current phase index so reloads reflect the engine's view.
+        txn_store.update_current_phase_idx(&id, instance.current_phase_idx)?;
+
         // Persist the phase state changes (failure_reason, status, timestamps).
         for (order, phase) in instance.phase_states.iter().enumerate() {
             txn_store.upsert_phase_state(&id, phase, order)?;
@@ -104,6 +107,28 @@ mod tests {
         // Advance to active state so we can call fail_phase.
         inst.start_phase().expect("start phase");
         store.insert_workflow(&inst).expect("insert workflow");
+        workflow_id
+    }
+
+    /// Insert a workflow advanced to phase 1 (audit) and active there.
+    fn insert_workflow_at_phase_1(store: &WorkflowStore, id: &str) -> WorkflowId {
+        let workflow_id = WorkflowId(id.to_string());
+        let mut inst = WorkflowInstance::new(
+            workflow_id.clone(),
+            impl_audit_default(),
+            "/handoffs/test.md",
+        );
+        // Complete phase 0 and manually advance to phase 1.
+        inst.start_phase().expect("start phase 0");
+        inst.complete_phase().expect("complete phase 0");
+        inst.current_phase_idx = 1;
+        inst.phase_states[1].status = PhaseStatus::Active;
+        inst.phase_states[1].started_at = Some(chrono::Utc::now());
+        store.insert_workflow(&inst).expect("insert workflow");
+        // Persist the advanced phase index.
+        store
+            .update_current_phase_idx(&workflow_id, 1)
+            .expect("update current_phase_idx");
         workflow_id
     }
 
@@ -183,5 +208,28 @@ mod tests {
             PhaseStatus::Failed,
             "phase status must be Failed"
         );
+    }
+
+    /// Regression: fail must persist current_phase_idx so reloads reflect
+    /// the engine's view, not a stale value from the last advance.
+    #[test]
+    fn fail_persists_current_phase_idx() {
+        let store = temp_store();
+        // Workflow at phase 1 (audit), active.
+        let workflow_id = insert_workflow_at_phase_1(&store, "01FAILIDX000000000000001");
+
+        // Fail the workflow while at phase 1.
+        run(workflow_id.0.as_str(), "audit failed", &store).expect("fail should succeed");
+
+        // Reload and verify current_phase_idx is 1 (the engine's view).
+        let loaded = store
+            .get_workflow(&workflow_id)
+            .expect("get")
+            .expect("should exist");
+        assert_eq!(
+            loaded.current_phase_idx, 1,
+            "current_phase_idx must reflect phase 1 after fail"
+        );
+        assert_eq!(loaded.status, WorkflowStatus::Failed);
     }
 }

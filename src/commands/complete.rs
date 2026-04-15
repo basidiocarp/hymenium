@@ -42,6 +42,9 @@ pub fn run(workflow_id: &str, store: &WorkflowStore) -> Result<(), CompleteComma
         // Persist the status update.
         txn_store.update_workflow_status(&id, &WorkflowStatus::Completed, None)?;
 
+        // Persist the current phase index so reloads reflect the engine's view.
+        txn_store.update_current_phase_idx(&id, instance.current_phase_idx)?;
+
         // Persist the phase state changes (timestamps, etc).
         for (order, phase) in instance.phase_states.iter().enumerate() {
             txn_store.upsert_phase_state(&id, phase, order)?;
@@ -184,5 +187,26 @@ mod tests {
             outcome.failure_type.is_none(),
             "completed outcomes have no failure_type"
         );
+    }
+
+    /// Regression: complete must persist current_phase_idx so reloads reflect
+    /// the engine's view, not a stale value from the last advance.
+    #[test]
+    fn complete_persists_current_phase_idx() {
+        let store = temp_store();
+        let workflow_id =
+            insert_final_phase_completed_workflow(&store, "01COMPLIDX0000000000000001");
+
+        run(workflow_id.0.as_str(), &store).expect("complete should succeed");
+
+        let loaded = store
+            .get_workflow(&workflow_id)
+            .expect("get")
+            .expect("should exist");
+        assert_eq!(
+            loaded.current_phase_idx, 1,
+            "current_phase_idx must reflect phase 1 after complete"
+        );
+        assert_eq!(loaded.status, WorkflowStatus::Completed);
     }
 }

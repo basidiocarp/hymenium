@@ -53,6 +53,9 @@ pub fn run(workflow_id: &str, store: &WorkflowStore) -> Result<(), CancelCommand
     store.with_transaction::<_, (), CancelCommandError>(|txn_store| {
         txn_store.update_workflow_status(&id, &WorkflowStatus::Cancelled, None)?;
 
+        // Persist the current phase index so reloads reflect the engine's view.
+        txn_store.update_current_phase_idx(&id, instance.current_phase_idx)?;
+
         txn_store.record_transition(
             &id,
             None,
@@ -311,6 +314,43 @@ mod tests {
             .expect("get_outcome")
             .expect("outcome should exist");
         assert_eq!(outcome.terminal_status, TerminalStatus::Cancelled);
+    }
+
+    /// Regression: cancel must persist current_phase_idx so reloads reflect
+    /// the engine's view, not a stale value.
+    #[test]
+    fn cancel_persists_current_phase_idx() {
+        let store = temp_store();
+        let workflow_id = WorkflowId("01CANCELIDX000000000000001".to_string());
+        let mut inst = WorkflowInstance::new(
+            workflow_id.clone(),
+            impl_audit_default(),
+            "/handoffs/test.md",
+        );
+        // Advance to phase 1 (audit) and mark it active.
+        inst.start_phase().expect("start phase 0");
+        inst.complete_phase().expect("complete phase 0");
+        inst.current_phase_idx = 1;
+        inst.phase_states[1].status = PhaseStatus::Active;
+        inst.phase_states[1].started_at = Some(chrono::Utc::now());
+        store.insert_workflow(&inst).expect("insert workflow");
+        store
+            .update_current_phase_idx(&workflow_id, 1)
+            .expect("update current_phase_idx");
+
+        // Cancel the workflow while at phase 1.
+        run(workflow_id.0.as_str(), &store).expect("cancel should succeed");
+
+        // Reload and verify current_phase_idx is 1.
+        let loaded = store
+            .get_workflow(&workflow_id)
+            .expect("get")
+            .expect("should exist");
+        assert_eq!(
+            loaded.current_phase_idx, 1,
+            "current_phase_idx must reflect phase 1 after cancel"
+        );
+        assert_eq!(loaded.status, WorkflowStatus::Cancelled);
     }
 
     /// Failing then attempting to cancel preserves the original failure outcome.

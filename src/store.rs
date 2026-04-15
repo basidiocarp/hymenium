@@ -163,6 +163,43 @@ impl WorkflowStore {
             );
             ",
         )?;
+
+        // Idempotent migration: add current_phase_idx for databases created
+        // before the column existed. CREATE TABLE IF NOT EXISTS is a no-op when
+        // the table already exists, so pre-existing databases will be missing
+        // this column. SQLite does not support ADD COLUMN IF NOT EXISTS, so we
+        // check pragma_table_info first.
+        self.ensure_column(
+            "workflows",
+            "current_phase_idx",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+
+        Ok(())
+    }
+
+    /// Add a column to a table if it does not already exist.
+    ///
+    /// `SQLite` lacks `ADD COLUMN IF NOT EXISTS`, so we query
+    /// `pragma_table_info` to check first.
+    fn ensure_column(
+        &self,
+        table: &str,
+        column: &str,
+        declaration: &str,
+    ) -> Result<(), StoreError> {
+        let exists: bool = self.conn.query_row(
+            &format!(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name = '{column}'"
+            ),
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            self.conn.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {declaration};"
+            ))?;
+        }
         Ok(())
     }
 
@@ -938,5 +975,133 @@ mod tests {
             loaded.current_phase_idx, 1,
             "persisted current_phase_idx should override heuristic scanning"
         );
+    }
+
+    /// Regression: migrate() must add the current_phase_idx column to
+    /// databases created before it existed. Simulates the old schema by
+    /// creating the workflows table without the column, then running
+    /// migrate() and verifying the column exists with a default of 0.
+    #[test]
+    fn test_migrate_adds_current_phase_idx_to_old_schema() {
+        // Create an in-memory database with the OLD schema (no current_phase_idx).
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE workflows (
+                workflow_id      TEXT PRIMARY KEY,
+                template_id      TEXT NOT NULL,
+                handoff_path     TEXT NOT NULL,
+                status           TEXT NOT NULL,
+                current_phase    TEXT,
+                blocked_on       TEXT,
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL,
+                template_json    TEXT NOT NULL
+            );
+
+            CREATE TABLE phase_states (
+                workflow_id    TEXT NOT NULL,
+                phase_id       TEXT NOT NULL,
+                role           TEXT NOT NULL,
+                status         TEXT NOT NULL,
+                agent_id       TEXT,
+                started_at     TEXT,
+                completed_at   TEXT,
+                canopy_task_id TEXT,
+                retry_count    INTEGER NOT NULL DEFAULT 0,
+                phase_order    INTEGER NOT NULL,
+                failure_reason TEXT,
+                PRIMARY KEY (workflow_id, phase_id),
+                FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE workflow_transitions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                workflow_id     TEXT NOT NULL,
+                from_phase      TEXT,
+                to_phase        TEXT,
+                transitioned_at TEXT NOT NULL,
+                reason          TEXT,
+                FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE workflow_outcomes (
+                workflow_id  TEXT PRIMARY KEY,
+                outcome_json TEXT NOT NULL,
+                created_at   TEXT NOT NULL
+            );
+            ",
+        )
+        .expect("create old schema");
+
+        // Insert a row using the old schema (no current_phase_idx column).
+        let now = chrono::Utc::now().to_rfc3339();
+        let template_json = serde_json::to_string(&crate::workflow::template::impl_audit_default())
+            .expect("serialize template");
+        conn.execute(
+            "INSERT INTO workflows
+                (workflow_id, template_id, handoff_path, status, current_phase,
+                 blocked_on, created_at, updated_at, template_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                "01MIGRATE0000000000000001",
+                "impl-audit",
+                "/handoffs/test.md",
+                "pending",
+                "implement",
+                rusqlite::types::Null,
+                now,
+                now,
+                template_json,
+            ],
+        )
+        .expect("insert old-schema row");
+
+        // Wrap the connection in a WorkflowStore and run migrate().
+        let store = WorkflowStore {
+            db_path: PathBuf::from(":memory:"),
+            conn,
+        };
+        store.migrate().expect("migrate should succeed");
+
+        // Verify the column exists and the default is 0 for the existing row.
+        let idx: i64 = store
+            .conn
+            .query_row(
+                "SELECT current_phase_idx FROM workflows WHERE workflow_id = ?1",
+                params!["01MIGRATE0000000000000001"],
+                |row| row.get(0),
+            )
+            .expect("current_phase_idx column should exist");
+        assert_eq!(idx, 0, "default current_phase_idx should be 0");
+
+        // Verify get_workflow works on the migrated row.
+        let loaded = store
+            .get_workflow(&WorkflowId("01MIGRATE0000000000000001".to_string()))
+            .expect("get_workflow should succeed")
+            .expect("row should exist");
+        assert_eq!(loaded.current_phase_idx, 0);
+    }
+
+    /// Regression: running migrate() twice does not fail. The ensure_column
+    /// check is idempotent — the second call detects the column already exists.
+    #[test]
+    fn test_migrate_is_idempotent() {
+        let store = temp_store();
+        // migrate() was already called by temp_store(). Call it again.
+        store
+            .migrate()
+            .expect("second migrate should succeed (idempotent)");
+        // Verify the column still works.
+        let idx: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('workflows') WHERE name = 'current_phase_idx'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("pragma query");
+        assert_eq!(idx, 1, "current_phase_idx column should exist exactly once");
     }
 }
