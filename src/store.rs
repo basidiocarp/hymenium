@@ -887,7 +887,7 @@ mod tests {
 
     #[test]
     fn test_current_phase_idx_persisted_and_loaded() {
-        use crate::workflow::engine::{PhaseState, PhaseStatus};
+        use crate::workflow::engine::PhaseStatus;
 
         let store = temp_store();
         let mut inst = make_instance("01JNQWF0000000000000000009");
@@ -977,10 +977,10 @@ mod tests {
         );
     }
 
-    /// Regression: migrate() must add the current_phase_idx column to
+    /// Regression: `migrate()` must add the `current_phase_idx` column to
     /// databases created before it existed. Simulates the old schema by
     /// creating the workflows table without the column, then running
-    /// migrate() and verifying the column exists with a default of 0.
+    /// `migrate()` and verifying the column exists with a default of 0.
     #[test]
     fn test_migrate_adds_current_phase_idx_to_old_schema() {
         // Create an in-memory database with the OLD schema (no current_phase_idx).
@@ -1084,7 +1084,7 @@ mod tests {
         assert_eq!(loaded.current_phase_idx, 0);
     }
 
-    /// Regression: running migrate() twice does not fail. The ensure_column
+    /// Regression: running `migrate()` twice does not fail. The `ensure_column`
     /// check is idempotent — the second call detects the column already exists.
     #[test]
     fn test_migrate_is_idempotent() {

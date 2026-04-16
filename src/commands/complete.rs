@@ -189,7 +189,7 @@ mod tests {
         );
     }
 
-    /// Regression: complete must persist current_phase_idx so reloads reflect
+    /// Regression: complete must persist `current_phase_idx` so reloads reflect
     /// the engine's view, not a stale value from the last advance.
     #[test]
     fn complete_persists_current_phase_idx() {

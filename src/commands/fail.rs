@@ -210,7 +210,7 @@ mod tests {
         );
     }
 
-    /// Regression: fail must persist current_phase_idx so reloads reflect
+    /// Regression: fail must persist `current_phase_idx` so reloads reflect
     /// the engine's view, not a stale value from the last advance.
     #[test]
     fn fail_persists_current_phase_idx() {

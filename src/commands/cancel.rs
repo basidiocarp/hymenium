@@ -190,7 +190,7 @@ mod tests {
         );
     }
 
-    /// Attempting to cancel an already-failed workflow returns AlreadyTerminal error.
+    /// Attempting to cancel an already-failed workflow returns `AlreadyTerminal` error.
     #[test]
     fn cancel_already_failed_workflow_returns_already_terminal() {
         use crate::commands::fail;
@@ -235,7 +235,7 @@ mod tests {
         );
     }
 
-    /// Attempting to cancel an already-completed workflow returns AlreadyTerminal error.
+    /// Attempting to cancel an already-completed workflow returns `AlreadyTerminal` error.
     #[test]
     fn cancel_already_completed_workflow_returns_already_terminal() {
         use crate::commands::complete;
@@ -316,7 +316,7 @@ mod tests {
         assert_eq!(outcome.terminal_status, TerminalStatus::Cancelled);
     }
 
-    /// Regression: cancel must persist current_phase_idx so reloads reflect
+    /// Regression: cancel must persist `current_phase_idx` so reloads reflect
     /// the engine's view, not a stale value.
     #[test]
     fn cancel_persists_current_phase_idx() {
