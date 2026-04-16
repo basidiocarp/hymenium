@@ -1,6 +1,8 @@
 use super::capability;
 use super::task_packet::{CapabilityRequirements, TaskPacket};
 use super::{CanopyClient, DispatchError, TaskOptions};
+use crate::classify::classify_error;
+use tracing;
 use crate::context::{
     estimate_text_tokens, BudgetContextEngine, CompressionParams, ContextEngine, ContextMessage,
     ContextMessageRole,
@@ -72,15 +74,19 @@ pub fn dispatch_workflow(
     let repo_required_capabilities = capability::capabilities_for_repo(repo_name);
 
     // Create the parent canopy task from the handoff.
-    let parent_task_id = canopy.create_task(
-        &handoff.title,
-        &parent_description,
-        project_root,
-        &TaskOptions {
-            required_capabilities: repo_required_capabilities.clone(),
-            ..TaskOptions::default()
-        },
-    )?;
+    let parent_task_id = canopy
+        .create_task(
+            &handoff.title,
+            &parent_description,
+            project_root,
+            &TaskOptions {
+                required_capabilities: repo_required_capabilities.clone(),
+                ..TaskOptions::default()
+            },
+        )
+        .inspect_err(|err| {
+            log_dispatch_error("create_task", err);
+        })?;
 
     // Build the workflow instance.
     let handoff_path = handoff
@@ -136,7 +142,11 @@ pub fn dispatch_workflow(
             required_capabilities: repo_required_capabilities.clone(),
         };
 
-        let subtask_id = canopy.create_subtask(&parent_task_id, &title, &description, &options)?;
+        let subtask_id = canopy
+            .create_subtask(&parent_task_id, &title, &description, &options)
+            .inspect_err(|err| {
+                log_dispatch_error("create_subtask", err);
+            })?;
 
         state.canopy_task_id = Some(subtask_id);
     }
@@ -156,6 +166,31 @@ pub fn dispatch_workflow(
 
     instance.status = crate::workflow::engine::WorkflowStatus::Dispatched;
     Ok(instance)
+}
+
+// ---------------------------------------------------------------------------
+// Error classification logging
+// ---------------------------------------------------------------------------
+
+/// Classify a [`DispatchError`] and emit a structured log entry.
+///
+/// This is additive — it does not change the error returned to the caller.
+/// The [`classify_error`] call uses `None` for the HTTP status because
+/// `DispatchError` wraps string messages rather than raw HTTP responses;
+/// body-hint signals (if any) are extracted from the formatted message.
+fn log_dispatch_error(operation: &str, err: &DispatchError) {
+    let body_hint = err.to_string();
+    let (reason, hint) = classify_error(None, Some(&body_hint));
+    tracing::warn!(
+        operation,
+        error = %err,
+        failover_reason = ?reason,
+        retryable = hint.retryable,
+        should_compress = hint.should_compress,
+        should_rotate_credential = hint.should_rotate_credential,
+        should_fallback = hint.should_fallback,
+        "dispatch error classified"
+    );
 }
 
 fn build_dispatch_context_messages(handoff: &ParsedHandoff) -> Vec<ContextMessage> {
