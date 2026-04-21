@@ -690,6 +690,7 @@ mod tests {
 
     #[test]
     fn status_chatter_via_handle_signal_returns_retry() {
+        use crate::store::WorkflowStore;
         use crate::workflow::engine::PhaseStatus;
         use crate::workflow::engine::WorkflowInstance;
         use crate::workflow::template::impl_audit_default;
@@ -704,6 +705,9 @@ mod tests {
         wf.phase_states[0].status = PhaseStatus::Active;
         wf.phase_states[0].started_at = Some(Utc::now());
 
+        let store = WorkflowStore::open(":memory:").expect("open in-memory store");
+        store.insert_workflow(&wf).expect("insert workflow");
+
         let signal = ProgressSignal::Stalled {
             phase_id: "implement".to_string(),
             since: Utc::now(),
@@ -712,7 +716,7 @@ mod tests {
         let policy = RetryPolicy::default();
 
         let action =
-            crate::monitor::handle_signal(&signal, &mut wf, 0, &policy).expect("should succeed");
+            crate::monitor::handle_signal(&signal, &mut wf, 0, &policy, &store).expect("should succeed");
         match action {
             RecoveryAction::Retry { narrowed_scope, .. } => {
                 assert!(

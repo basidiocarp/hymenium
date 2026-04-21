@@ -187,8 +187,12 @@ impl RuntimeRegistry {
         Ok(())
     }
 
-    /// Return all runtime entries, ordered by registration time.
-    pub fn list_all(&self) -> Result<Vec<RuntimeEntry>, SweeperError> {
+    /// Return all runtime entries with timestamp parse errors, ordered by registration time.
+    ///
+    /// Timestamp parse errors are collected and returned as a vector of error strings.
+    /// The method continues processing even when timestamps are corrupt, using fallback
+    /// values (current time) so that sweep operations can continue.
+    fn list_all_with_errors(&self) -> Result<(Vec<RuntimeEntry>, Vec<String>), SweeperError> {
         let mut stmt = self.conn.prepare(
             "SELECT runtime_id, status, last_heartbeat, registered_at, went_offline_at
              FROM runtimes
@@ -207,11 +211,27 @@ impl RuntimeRegistry {
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut entries = Vec::with_capacity(rows.len());
+        let mut errors = Vec::new();
+
         for (id, status_str, hb_str, reg_str, offline_str) in rows {
             let status = RuntimeStatus::from_str(&status_str).unwrap_or(RuntimeStatus::Offline);
-            let last_heartbeat = parse_dt(&hb_str).unwrap_or_else(|_| Utc::now());
-            let registered_at = parse_dt(&reg_str).unwrap_or_else(|_| Utc::now());
-            let went_offline_at = offline_str.as_deref().and_then(|s| parse_dt(s).ok());
+            let last_heartbeat = parse_dt(&hb_str).unwrap_or_else(|e| {
+                warn!("sweeper: invalid last_heartbeat for {}: {e}, using current time", id);
+                errors.push(format!("corrupt timestamp for runtime {}: invalid last_heartbeat: {e}", id));
+                Utc::now()
+            });
+            let registered_at = parse_dt(&reg_str).unwrap_or_else(|e| {
+                warn!("sweeper: invalid registered_at for {}: {e}, using current time", id);
+                errors.push(format!("corrupt timestamp for runtime {}: invalid registered_at: {e}", id));
+                Utc::now()
+            });
+            let went_offline_at = offline_str.as_deref().and_then(|s| {
+                parse_dt(s).map_err(|e| {
+                    warn!("sweeper: invalid went_offline_at for {}: {e}", id);
+                    errors.push(format!("corrupt timestamp for runtime {}: invalid went_offline_at: {e}", id));
+                    e
+                }).ok()
+            });
             entries.push(RuntimeEntry {
                 runtime_id: id,
                 status,
@@ -220,6 +240,12 @@ impl RuntimeRegistry {
                 went_offline_at,
             });
         }
+        Ok((entries, errors))
+    }
+
+    /// Return all runtime entries, ordered by registration time.
+    pub fn list_all(&self) -> Result<Vec<RuntimeEntry>, SweeperError> {
+        let (entries, _errors) = self.list_all_with_errors()?;
         Ok(entries)
     }
 
@@ -262,6 +288,9 @@ impl RuntimeRegistry {
     ///
     /// Operates against the `phase_states` table already present in the
     /// workflow database (same file, same connection).
+    ///
+    /// To avoid exceeding SQLite's variable limit (999), chunks the input into
+    /// batches of 999 and runs the query once per batch, merging results.
     fn active_phases_for_runtimes(
         &self,
         offline_ids: &[&str],
@@ -269,28 +298,41 @@ impl RuntimeRegistry {
         if offline_ids.is_empty() {
             return Ok(Vec::new());
         }
-        // Build a parameterized IN clause.
-        let placeholders: String = offline_ids
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("?{}", i + 1))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let sql = format!(
-            "SELECT workflow_id, phase_id, agent_id FROM phase_states
-             WHERE status = 'active' AND agent_id IN ({placeholders})"
-        );
-        let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(offline_ids.iter()), |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(rows)
+
+        const SQLITE_VARIABLE_LIMIT: usize = 999;
+        let mut all_results = Vec::new();
+
+        // Chunk the offline_ids into batches of SQLITE_VARIABLE_LIMIT.
+        for chunk in offline_ids.chunks(SQLITE_VARIABLE_LIMIT) {
+            if chunk.is_empty() {
+                continue;
+            }
+
+            // Build a parameterized IN clause for this batch.
+            let placeholders: String = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT workflow_id, phase_id, agent_id FROM phase_states
+                 WHERE status = 'active' AND agent_id IN ({placeholders})"
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            all_results.extend(rows);
+        }
+
+        Ok(all_results)
     }
 
     /// Transition an active phase to failed with the given reason.
@@ -352,8 +394,14 @@ pub fn run_sweep(
     let mut report = SweepReport::default();
 
     // -- Phase 1: heartbeat timeout ------------------------------------------
-    let all_runtimes = match registry.list_all() {
-        Ok(r) => r,
+    let all_runtimes = match registry.list_all_with_errors() {
+        Ok((r, ts_errors)) => {
+            // Surface timestamp parse errors in the report
+            for ts_err in ts_errors {
+                report.errors.push(ts_err);
+            }
+            r
+        }
         Err(e) => {
             warn!("sweeper: failed to list runtimes: {e}");
             report.errors.push(format!("list runtimes: {e}"));
@@ -483,7 +531,7 @@ pub struct Sweeper {
 impl std::fmt::Debug for Sweeper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Sweeper")
-            .field("stopped", &self.stop_flag.load(Ordering::Relaxed))
+            .field("stopped", &self.stop_flag.load(Ordering::Acquire))
             .finish_non_exhaustive()
     }
 }
@@ -524,7 +572,7 @@ impl Sweeper {
                     }
                 };
 
-                while !stop_flag_clone.load(Ordering::Relaxed) {
+                while !stop_flag_clone.load(Ordering::Acquire) {
                     let report = run_sweep(&registry, heartbeat_timeout, gc_retention);
                     if !report.errors.is_empty() {
                         for err in &report.errors {
@@ -543,7 +591,7 @@ impl Sweeper {
                     // without waiting the full interval.
                     let step = Duration::from_millis(250);
                     let mut slept = Duration::ZERO;
-                    while slept < sweep_interval && !stop_flag_clone.load(Ordering::Relaxed) {
+                    while slept < sweep_interval && !stop_flag_clone.load(Ordering::Acquire) {
                         std::thread::sleep(step);
                         slept += step;
                     }
@@ -565,7 +613,7 @@ impl Sweeper {
 
     /// Signal the sweeper to stop and wait for the thread to exit.
     pub fn stop(mut self) {
-        self.stop_flag.store(true, Ordering::Relaxed);
+        self.stop_flag.store(true, Ordering::Release);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }
@@ -574,7 +622,7 @@ impl Sweeper {
 
 impl Drop for Sweeper {
     fn drop(&mut self) {
-        self.stop_flag.store(true, Ordering::Relaxed);
+        self.stop_flag.store(true, Ordering::Release);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }

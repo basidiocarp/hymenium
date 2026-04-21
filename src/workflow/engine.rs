@@ -22,6 +22,9 @@ pub enum WorkflowError {
     #[error("phase {phase_id} gate evaluation failed: {reason}")]
     GateFailed { phase_id: String, reason: String },
 
+    #[error("already at final phase — call complete_workflow() to finish")]
+    AlreadyAtFinalPhase,
+
     #[error("workflow state error: {0}")]
     StateError(String),
 }
@@ -275,6 +278,31 @@ impl WorkflowInstance {
         Ok(())
     }
 
+    /// Prepare the current phase for a retry by incrementing retry count.
+    ///
+    /// Increments `retry_count` on the current phase. This should be called
+    /// before re-dispatching a stalled or failed phase. The phase must be
+    /// Active (currently running) at the time of the retry decision.
+    ///
+    /// The caller is responsible for persisting the updated state via
+    /// `WorkflowStore::upsert_phase_state` after this method returns.
+    pub fn increment_retry_count(&mut self) -> WorkflowEngineResult<()> {
+        let phase = self
+            .current_phase_mut()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
+
+        if phase.status != PhaseStatus::Active {
+            return Err(WorkflowError::StateError(format!(
+                "cannot retry phase {} not in Active status {:?}",
+                phase.phase_id, phase.status
+            )));
+        }
+
+        phase.retry_count = phase.retry_count.saturating_add(1);
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
     /// Check if the current phase's exit gates are satisfied.
     pub fn can_advance(&self, evaluator: &impl GateEvaluator) -> WorkflowEngineResult<bool> {
         let phase_state = self
@@ -328,9 +356,7 @@ impl WorkflowInstance {
         // Guard: check if already at final phase (use saturating_sub to avoid underflow)
         let last_idx = self.template.phases.len().saturating_sub(1);
         if self.current_phase_idx >= last_idx {
-            return Err(WorkflowError::StateError(
-                "already at final phase — call complete_workflow() to finish".to_string(),
-            ));
+            return Err(WorkflowError::AlreadyAtFinalPhase);
         }
 
         // Check exit gates of current phase

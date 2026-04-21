@@ -182,11 +182,13 @@ impl WorkflowStore {
     ///
     /// `SQLite` lacks `ADD COLUMN IF NOT EXISTS`, so we query
     /// `pragma_table_info` to check first.
+    ///
+    /// Parameters are `&'static str` to prevent SQL injection at compile time.
     fn ensure_column(
         &self,
-        table: &str,
-        column: &str,
-        declaration: &str,
+        table: &'static str,
+        column: &'static str,
+        declaration: &'static str,
     ) -> Result<(), StoreError> {
         let exists: bool = self.conn.query_row(
             &format!(
