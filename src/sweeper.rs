@@ -215,16 +215,30 @@ impl RuntimeRegistry {
 
         for (id, status_str, hb_str, reg_str, offline_str) in rows {
             let status = RuntimeStatus::from_str(&status_str).unwrap_or(RuntimeStatus::Offline);
-            let last_heartbeat = parse_dt(&hb_str).unwrap_or_else(|e| {
-                warn!("sweeper: invalid last_heartbeat for {}: {e}, using current time", id);
-                errors.push(format!("corrupt timestamp for runtime {}: invalid last_heartbeat: {e}", id));
-                Utc::now()
-            });
-            let registered_at = parse_dt(&reg_str).unwrap_or_else(|e| {
-                warn!("sweeper: invalid registered_at for {}: {e}, using current time", id);
-                errors.push(format!("corrupt timestamp for runtime {}: invalid registered_at: {e}", id));
-                Utc::now()
-            });
+
+            // Parse last_heartbeat; if corrupt, log and record error but do NOT
+            // substitute Utc::now(). Mark the runtime as potentially stale.
+            let last_heartbeat = match parse_dt(&hb_str) {
+                Ok(dt) => dt,
+                Err(e) => {
+                    warn!("sweeper: invalid last_heartbeat for {}: {e}", id);
+                    errors.push(format!("corrupt timestamp for runtime {}: invalid last_heartbeat: {e}", id));
+                    // Use a very old timestamp so the runtime will be marked offline
+                    // on the next sweep, preventing orphan masking.
+                    Utc::now() - chrono::Duration::days(365)
+                }
+            };
+
+            let registered_at = match parse_dt(&reg_str) {
+                Ok(dt) => dt,
+                Err(e) => {
+                    warn!("sweeper: invalid registered_at for {}: {e}", id);
+                    errors.push(format!("corrupt timestamp for runtime {}: invalid registered_at: {e}", id));
+                    // Use a very old timestamp as fallback
+                    Utc::now() - chrono::Duration::days(365)
+                }
+            };
+
             let went_offline_at = offline_str.as_deref().and_then(|s| {
                 parse_dt(s).map_err(|e| {
                     warn!("sweeper: invalid went_offline_at for {}: {e}", id);
@@ -535,6 +549,10 @@ impl std::fmt::Debug for Sweeper {
             .finish_non_exhaustive()
     }
 }
+
+// Note: stop_flag uses Acquire/Release ordering:
+// - Acquire on reads: ensures all prior stores become visible
+// - Release on writes: ensures stores are visible to readers before signaling
 
 impl Sweeper {
     /// Start the sweeper background thread, opening the runtime registry at

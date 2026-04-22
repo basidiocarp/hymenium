@@ -183,7 +183,12 @@ impl WorkflowStore {
     /// `SQLite` lacks `ADD COLUMN IF NOT EXISTS`, so we query
     /// `pragma_table_info` to check first.
     ///
-    /// Parameters are `&'static str` to prevent SQL injection at compile time.
+    /// # Safety
+    ///
+    /// This method accepts `&'static str` parameters to enforce compile-time
+    /// string literals at the call site. All arguments MUST be string literals.
+    /// Do not call this method with externally-derived or dynamic table, column,
+    /// or declaration strings; doing so would create a SQL injection surface.
     fn ensure_column(
         &self,
         table: &'static str,

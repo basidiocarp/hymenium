@@ -101,9 +101,17 @@ pub fn dispatch_workflow(
     let acceptance_criteria = build_acceptance_criteria(handoff);
 
     // Create a subtask for each phase and store its canopy task ID.
-    // NOTE: If a subtask creation fails mid-loop, previously created tasks in
-    // canopy are orphaned. The CanopyClient trait does not yet expose a cancel
-    // method, so cleanup is not possible here. Track as a known limitation.
+    //
+    // KNOWN LIMITATION: If a subtask creation fails mid-loop, previously created
+    // tasks in canopy are orphaned (permanently unreferenced from hymenium).
+    // The CanopyClient trait does not yet expose a cancel_task method, so cleanup
+    // is not possible at this time. Orphaned tasks remain in Canopy's ledger but
+    // are never assigned agents or monitored for progress.
+    //
+    // OPERATORS: If dispatch fails partway through, inspect Canopy manually to
+    // find and cancel orphaned subtasks. A future reconciliation scan
+    // (see TODO below) can automate this.
+    //
     // TODO(#118f-rollback): add CanopyClient::cancel_task and compensate on failure.
     for (phase, state) in template.phases.iter().zip(instance.phase_states.iter_mut()) {
         let title = format!("[{}] {}", phase.role, phase.phase_id);

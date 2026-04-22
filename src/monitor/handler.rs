@@ -12,12 +12,16 @@ use super::{MonitorError, ProgressSignal};
 /// is responsible for executing the returned [`RecoveryAction`] (e.g., re-dispatch,
 /// narrow scope, escalate tier, or notify the operator).
 ///
+/// The retry count is read from the workflow's current phase state, ensuring
+/// that each recovery decision uses the actual current retry count even in
+/// successive retries.
+///
 /// Returns the [`RecoveryAction`] that the caller should execute. For healthy
 /// or already-complete signals the action is `Cancel` (no recovery needed).
 pub fn handle_signal(
     signal: &ProgressSignal,
     workflow: &mut WorkflowInstance,
-    retry_count: u32,
+    _retry_count: u32,
     policy: &RetryPolicy,
     store: &WorkflowStore,
 ) -> Result<RecoveryAction, MonitorError> {
@@ -34,7 +38,13 @@ pub fn handle_signal(
             reason: "gate noted".to_string(),
         }),
         ProgressSignal::Stalled { .. } | ProgressSignal::Failed { .. } => {
-            let action = decide_recovery(signal, retry_count, policy);
+            // Read the current retry count from the workflow's phase state.
+            // This ensures recovery decisions use the actual count, not a stale value.
+            let current_retry_count = workflow
+                .current_phase()
+                .map(|p| p.retry_count)
+                .unwrap_or(0);
+            let action = decide_recovery(signal, current_retry_count, policy);
 
             // If the recovery action is Retry, increment the retry counter and persist it.
             if matches!(action, RecoveryAction::Retry { .. }) {
