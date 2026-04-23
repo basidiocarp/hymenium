@@ -16,6 +16,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+
   ci:
     uses: basidiocarp/.github/.github/workflows/rust-ci.yml@ac464bbd159bc15d40a4d496c44c1a8d77e3d50f
     with:
