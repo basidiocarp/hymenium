@@ -40,18 +40,13 @@ pub fn handle_signal(
         ProgressSignal::Stalled { .. } | ProgressSignal::Failed { .. } => {
             // Read the current retry count from the workflow's phase state.
             // This ensures recovery decisions use the actual count, not a stale value.
-            let current_retry_count = workflow
-                .current_phase()
-                .map(|p| p.retry_count)
-                .unwrap_or(0);
+            let current_retry_count = workflow.current_phase().map_or(0, |p| p.retry_count);
             let action = decide_recovery(signal, current_retry_count, policy);
 
             // If the recovery action is Retry, increment the retry counter and persist it.
             if matches!(action, RecoveryAction::Retry { .. }) {
                 workflow.increment_retry_count().map_err(|e| {
-                    MonitorError::InvalidState(format!(
-                        "failed to increment retry count: {e}"
-                    ))
+                    MonitorError::InvalidState(format!("failed to increment retry count: {e}"))
                 })?;
 
                 // Persist the updated phase state (with incremented retry_count).
@@ -87,7 +82,6 @@ mod tests {
     use crate::workflow::template::impl_audit_default;
     use crate::workflow::WorkflowId;
     use chrono::Utc;
-    use std::path::PathBuf;
 
     use super::super::test_helpers::make_workflow;
     use super::super::StallReason;

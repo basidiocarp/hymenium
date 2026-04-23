@@ -2,7 +2,6 @@ use super::capability;
 use super::task_packet::{CapabilityRequirements, TaskPacket};
 use super::{CanopyClient, DispatchError, TaskOptions};
 use crate::classify::classify_error;
-use tracing;
 use crate::context::{
     estimate_text_tokens, BudgetContextEngine, CompressionParams, ContextEngine, ContextMessage,
     ContextMessageRole,
@@ -12,6 +11,7 @@ use crate::workflow::engine::WorkflowInstance;
 use crate::workflow::template::AgentRole;
 use crate::workflow::template::WorkflowTemplate;
 use crate::workflow::WorkflowId;
+use tracing;
 
 const DISPATCH_CONTEXT_TOKEN_BUDGET: usize = 64;
 

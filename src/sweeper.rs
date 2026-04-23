@@ -222,7 +222,10 @@ impl RuntimeRegistry {
                 Ok(dt) => dt,
                 Err(e) => {
                     warn!("sweeper: invalid last_heartbeat for {}: {e}", id);
-                    errors.push(format!("corrupt timestamp for runtime {}: invalid last_heartbeat: {e}", id));
+                    errors.push(format!(
+                        "corrupt timestamp for runtime {}: invalid last_heartbeat: {e}",
+                        id
+                    ));
                     // Use a very old timestamp so the runtime will be marked offline
                     // on the next sweep, preventing orphan masking.
                     Utc::now() - chrono::Duration::days(365)
@@ -233,18 +236,26 @@ impl RuntimeRegistry {
                 Ok(dt) => dt,
                 Err(e) => {
                     warn!("sweeper: invalid registered_at for {}: {e}", id);
-                    errors.push(format!("corrupt timestamp for runtime {}: invalid registered_at: {e}", id));
+                    errors.push(format!(
+                        "corrupt timestamp for runtime {}: invalid registered_at: {e}",
+                        id
+                    ));
                     // Use a very old timestamp as fallback
                     Utc::now() - chrono::Duration::days(365)
                 }
             };
 
             let went_offline_at = offline_str.as_deref().and_then(|s| {
-                parse_dt(s).map_err(|e| {
-                    warn!("sweeper: invalid went_offline_at for {}: {e}", id);
-                    errors.push(format!("corrupt timestamp for runtime {}: invalid went_offline_at: {e}", id));
-                    e
-                }).ok()
+                parse_dt(s)
+                    .map_err(|e| {
+                        warn!("sweeper: invalid went_offline_at for {}: {e}", id);
+                        errors.push(format!(
+                            "corrupt timestamp for runtime {}: invalid went_offline_at: {e}",
+                            id
+                        ));
+                        e
+                    })
+                    .ok()
             });
             entries.push(RuntimeEntry {
                 runtime_id: id,
@@ -303,17 +314,17 @@ impl RuntimeRegistry {
     /// Operates against the `phase_states` table already present in the
     /// workflow database (same file, same connection).
     ///
-    /// To avoid exceeding SQLite's variable limit (999), chunks the input into
+    /// To avoid exceeding `SQLite`'s variable limit (999), chunks the input into
     /// batches of 999 and runs the query once per batch, merging results.
     fn active_phases_for_runtimes(
         &self,
         offline_ids: &[&str],
     ) -> Result<Vec<(String, String, String)>, SweeperError> {
+        const SQLITE_VARIABLE_LIMIT: usize = 999;
+
         if offline_ids.is_empty() {
             return Ok(Vec::new());
         }
-
-        const SQLITE_VARIABLE_LIMIT: usize = 999;
         let mut all_results = Vec::new();
 
         // Chunk the offline_ids into batches of SQLITE_VARIABLE_LIMIT.

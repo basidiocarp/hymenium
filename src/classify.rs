@@ -123,9 +123,7 @@ pub fn classify_error(
     status: Option<u16>,
     body_hint: Option<&str>,
 ) -> (FailoverReason, RecoveryHint) {
-    let body_lower = body_hint
-        .map(str::to_lowercase)
-        .unwrap_or_default();
+    let body_lower = body_hint.map(str::to_lowercase).unwrap_or_default();
 
     // 1. 401 — credential problem, highest priority.
     if status == Some(401) {

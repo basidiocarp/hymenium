@@ -715,8 +715,8 @@ mod tests {
         };
         let policy = RetryPolicy::default();
 
-        let action =
-            crate::monitor::handle_signal(&signal, &mut wf, 0, &policy, &store).expect("should succeed");
+        let action = crate::monitor::handle_signal(&signal, &mut wf, 0, &policy, &store)
+            .expect("should succeed");
         match action {
             RecoveryAction::Retry { narrowed_scope, .. } => {
                 assert!(
