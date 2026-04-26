@@ -3,6 +3,13 @@
 //! Translates workflow phases into canopy task operations. This module is the
 //! only outbound write surface to canopy — it creates tasks, assigns agents,
 //! and checks completeness, but never accesses canopy's database directly.
+//!
+//! ## Dispatch Request Contract
+//!
+//! Workflow dispatch intake follows the `dispatch-request-v1` contract schema
+//! defined in `septa/dispatch-request-v1.schema.json`. The orchestration layer
+//! receives dispatch requests and translates them into canopy task creation
+//! calls using the Canopy CLI adapter in `cli.rs`.
 
 pub mod capability;
 mod cli;
@@ -69,6 +76,10 @@ pub struct TaskOptions {
     /// Drawn from the shared vocabulary in `dispatch/capability.rs`.
     /// An empty list means any agent can claim the task (backward-compatible).
     pub required_capabilities: Vec<String>,
+    /// User or agent identity who requested this task.
+    ///
+    /// Used by canopy to track task provenance. If None, omitted from the create command.
+    pub requested_by: Option<String>,
 }
 
 /// Detail record for a canopy task.
@@ -128,7 +139,15 @@ pub trait CanopyClient {
     ) -> Result<String, DispatchError>;
 
     /// Assign a task to an agent.
-    fn assign_task(&self, task_id: &str, agent_id: &str) -> Result<(), DispatchError>;
+    ///
+    /// The `assigned_by` parameter identifies who is performing the assignment (typically the
+    /// workflow orchestrator name or user identity).
+    fn assign_task(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        assigned_by: &str,
+    ) -> Result<(), DispatchError>;
 
     /// Fetch the detail record for a task.
     fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError>;

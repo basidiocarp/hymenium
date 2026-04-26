@@ -123,7 +123,12 @@ impl CanopyClient for MockCanopyClient {
         Ok(task_id)
     }
 
-    fn assign_task(&self, task_id: &str, agent_id: &str) -> Result<(), DispatchError> {
+    fn assign_task(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        _assigned_by: &str,
+    ) -> Result<(), DispatchError> {
         let mut tasks = self.tasks.borrow_mut();
         let detail = tasks
             .get_mut(task_id)
@@ -197,7 +202,8 @@ mod tests {
         let id = mock
             .create_task("task", "desc", ".", &TaskOptions::default())
             .expect("create_task");
-        mock.assign_task(&id, "agent-1").expect("assign_task");
+        mock.assign_task(&id, "agent-1", "hymenium")
+            .expect("assign_task");
 
         let detail = mock.get_task(&id).expect("get_task");
         assert_eq!(detail.agent_id.as_deref(), Some("agent-1"));

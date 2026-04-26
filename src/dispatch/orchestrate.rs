@@ -81,6 +81,7 @@ pub fn dispatch_workflow(
             project_root,
             &TaskOptions {
                 required_capabilities: repo_required_capabilities.clone(),
+                requested_by: Some("hymenium".to_string()),
                 ..TaskOptions::default()
             },
         )
@@ -148,6 +149,7 @@ pub fn dispatch_workflow(
             required_tier: Some(phase.agent_tier.clone()),
             verification_required: !phase.exit_gate.requires.is_empty(),
             required_capabilities: repo_required_capabilities.clone(),
+            requested_by: Some("hymenium".to_string()),
         };
 
         let subtask_id = canopy
@@ -164,7 +166,7 @@ pub fn dispatch_workflow(
         let agent = agent_name(&first_phase.effective_agent_role(), repo_name, &slug, 1);
         if let Some(first_state) = instance.phase_states.first() {
             if let Some(ref task_id) = first_state.canopy_task_id {
-                canopy.assign_task(task_id, &agent)?;
+                canopy.assign_task(task_id, &agent, "hymenium")?;
             }
         }
         if let Some(first_state) = instance.phase_states.first_mut() {

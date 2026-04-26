@@ -60,12 +60,12 @@ impl CliCanopyClient {
             args.push("--required-role".to_string());
             args.push(role.to_string());
         }
-        if let Some(ref tier) = options.required_tier {
-            args.push("--required-tier".to_string());
-            args.push(tier.to_string());
-        }
         if options.verification_required {
             args.push("--verification-required".to_string());
+        }
+        if let Some(requested_by) = &options.requested_by {
+            args.push("--requested-by".to_string());
+            args.push(requested_by.clone());
         }
         // Pass capability requirements as a comma-separated list matching canopy's
         // --required-capabilities flag (value_delimiter = ',').
@@ -99,12 +99,12 @@ impl CliCanopyClient {
             args.push("--required-role".to_string());
             args.push(role.to_string());
         }
-        if let Some(ref tier) = options.required_tier {
-            args.push("--required-tier".to_string());
-            args.push(tier.to_string());
-        }
         if options.verification_required {
             args.push("--verification-required".to_string());
+        }
+        if let Some(requested_by) = &options.requested_by {
+            args.push("--requested-by".to_string());
+            args.push(requested_by.clone());
         }
         // Pass capability requirements as a comma-separated list matching canopy's
         // --required-capabilities flag (value_delimiter = ',').
@@ -113,6 +113,26 @@ impl CliCanopyClient {
             args.push(options.required_capabilities.join(","));
         }
         args
+    }
+
+    /// Build the CLI args for `task assign`.
+    ///
+    /// Canopy requires: `--task-id <id>  --assigned-to <agent>  --assigned-by <user>`
+    pub(crate) fn build_assign_task_args(
+        task_id: &str,
+        assigned_to: &str,
+        assigned_by: &str,
+    ) -> Vec<String> {
+        vec![
+            "task".to_string(),
+            "assign".to_string(),
+            "--task-id".to_string(),
+            task_id.to_string(),
+            "--assigned-to".to_string(),
+            assigned_to.to_string(),
+            "--assigned-by".to_string(),
+            assigned_by.to_string(),
+        ]
     }
 }
 
@@ -141,8 +161,15 @@ impl CanopyClient for CliCanopyClient {
         self.run(&args)
     }
 
-    fn assign_task(&self, task_id: &str, agent_id: &str) -> Result<(), DispatchError> {
-        self.run(&["task", "assign", task_id, "--agent", agent_id])?;
+    fn assign_task(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        assigned_by: &str,
+    ) -> Result<(), DispatchError> {
+        let owned = Self::build_assign_task_args(task_id, agent_id, assigned_by);
+        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+        self.run(&args)?;
         Ok(())
     }
 
@@ -251,6 +278,124 @@ mod tests {
         assert!(
             !args.iter().any(|a| a == "--required-capabilities"),
             "--required-capabilities must not appear when capabilities are empty"
+        );
+    }
+
+    // -- create_task requested-by tests -------------------------------------------
+
+    #[test]
+    fn build_create_task_args_includes_requested_by() {
+        let options = TaskOptions {
+            requested_by: Some("hymenium".to_string()),
+            ..Default::default()
+        };
+        let args = CliCanopyClient::build_create_task_args("t", "d", ".", &options);
+
+        let pos = args
+            .iter()
+            .position(|a| a == "--requested-by")
+            .expect("--requested-by should be present");
+        assert_eq!(
+            args.get(pos + 1).map(String::as_str),
+            Some("hymenium"),
+            "requested-by value should follow immediately"
+        );
+    }
+
+    #[test]
+    fn build_create_task_args_omits_requested_by_when_none() {
+        let options = TaskOptions::default();
+        let args = CliCanopyClient::build_create_task_args("t", "d", ".", &options);
+
+        assert!(
+            !args.iter().any(|a| a == "--requested-by"),
+            "--requested-by must not appear when not set"
+        );
+    }
+
+    #[test]
+    fn build_create_task_args_omits_tier_flag() {
+        let options = TaskOptions {
+            required_tier: Some(crate::workflow::template::AgentTier::Opus),
+            ..Default::default()
+        };
+        let args = CliCanopyClient::build_create_task_args("t", "d", ".", &options);
+
+        // Verify tier is not rendered as a CLI flag (not supported by canopy)
+        assert!(
+            !args.iter().any(|a| a.contains("tier")),
+            "tier-related flags must not appear in create task args"
+        );
+    }
+
+    // -- assign_task args tests ---------------------------------------------------
+
+    #[test]
+    fn build_assign_task_args_uses_named_flags() {
+        let args = CliCanopyClient::build_assign_task_args("task-1", "agent-1", "hymenium");
+
+        let task_pos = args
+            .iter()
+            .position(|a| a == "--task-id")
+            .expect("--task-id should be present");
+        assert_eq!(
+            args.get(task_pos + 1).map(String::as_str),
+            Some("task-1"),
+            "--task-id value"
+        );
+
+        let to_pos = args
+            .iter()
+            .position(|a| a == "--assigned-to")
+            .expect("--assigned-to should be present");
+        assert_eq!(
+            args.get(to_pos + 1).map(String::as_str),
+            Some("agent-1"),
+            "--assigned-to value"
+        );
+
+        let by_pos = args
+            .iter()
+            .position(|a| a == "--assigned-by")
+            .expect("--assigned-by should be present");
+        assert_eq!(
+            args.get(by_pos + 1).map(String::as_str),
+            Some("hymenium"),
+            "--assigned-by value"
+        );
+    }
+
+    #[test]
+    fn build_create_subtask_args_includes_requested_by() {
+        let options = TaskOptions {
+            requested_by: Some("workflow-engine".to_string()),
+            ..Default::default()
+        };
+        let args = CliCanopyClient::build_create_subtask_args("parent-1", "t", "d", &options);
+
+        let pos = args
+            .iter()
+            .position(|a| a == "--requested-by")
+            .expect("--requested-by should be present");
+        assert_eq!(
+            args.get(pos + 1).map(String::as_str),
+            Some("workflow-engine"),
+            "requested-by value should follow immediately"
+        );
+    }
+
+    #[test]
+    fn build_create_subtask_args_omits_tier_flag() {
+        let options = TaskOptions {
+            required_tier: Some(crate::workflow::template::AgentTier::Sonnet),
+            ..Default::default()
+        };
+        let args = CliCanopyClient::build_create_subtask_args("parent-1", "t", "d", &options);
+
+        // Verify tier is not rendered as a CLI flag (not supported by canopy)
+        assert!(
+            !args.iter().any(|a| a.contains("tier")),
+            "tier-related flags must not appear in create subtask args"
         );
     }
 }

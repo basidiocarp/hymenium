@@ -95,10 +95,8 @@ fn extract_metadata(lines: &[&str]) -> Option<HandoffMetadata> {
                         .map(std::string::ToString::to_string)
                         .collect();
                 }
-                "Cross-repo edits" => {
-                    if !value.1.to_lowercase().contains("none") {
-                        metadata.cross_repo_rule = Some(value.1);
-                    }
+                "Cross-repo edits" if !value.1.to_lowercase().contains("none") => {
+                    metadata.cross_repo_rule = Some(value.1);
                 }
                 "Non-goals" => {
                     metadata.non_goals = split_list(&value.1);

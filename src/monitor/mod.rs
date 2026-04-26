@@ -187,7 +187,12 @@ pub(super) mod test_helpers {
             Ok("unused".to_string())
         }
 
-        fn assign_task(&self, _task_id: &str, _agent_id: &str) -> Result<(), DispatchError> {
+        fn assign_task(
+            &self,
+            _task_id: &str,
+            _agent_id: &str,
+            _assigned_by: &str,
+        ) -> Result<(), DispatchError> {
             Ok(())
         }
 
