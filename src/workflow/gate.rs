@@ -142,6 +142,28 @@ pub trait GateEvaluator {
     }
 }
 
+/// Gate evaluator that passes every condition unconditionally.
+///
+/// Used during reconciliation where a completed Canopy task implies the
+/// assigned agent already satisfied all gate conditions as part of its work.
+/// Hymenium trusts the Canopy completion signal as the gate outcome.
+#[derive(Debug, Clone, Default)]
+pub struct PermissiveGateEvaluator;
+
+impl GateEvaluator for PermissiveGateEvaluator {
+    fn evaluate(
+        &self,
+        condition: &GateCondition,
+        _context: &GateContext,
+    ) -> GateResult<ConditionEvaluation> {
+        Ok(ConditionEvaluation {
+            condition: condition.clone(),
+            passed: true,
+            reason: "condition satisfied (permissive reconciliation)".to_string(),
+        })
+    }
+}
+
 /// Mock gate evaluator for testing.
 /// Allows setting which conditions pass or fail.
 #[derive(Debug, Clone, Serialize, Deserialize)]
