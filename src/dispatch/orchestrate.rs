@@ -37,6 +37,7 @@ const DISPATCH_CONTEXT_TOKEN_BUDGET: usize = 64;
 /// Panics if `serde_json` fails to serialize a `TaskPacket`. This is considered
 /// a programming error because `TaskPacket` contains only primitive JSON-compatible
 /// types derived from `serde::Serialize` with no serde-incompatible fields.
+#[allow(clippy::too_many_lines)]
 pub fn dispatch_workflow(
     handoff: &ParsedHandoff,
     template: &WorkflowTemplate,
@@ -119,12 +120,16 @@ pub fn dispatch_workflow(
     //
     // TODO(#118f-rollback): add CanopyClient::cancel_task and compensate on failure.
     for (phase, state) in template.phases.iter().zip(instance.phase_states.iter_mut()) {
-        let title = format!("[{}] {}", phase.role, phase.phase_id);
+        let title = format!("[{}] {} \u{2014} {}", phase.role, phase.phase_id, handoff.title);
 
         // Build a structured task packet for this phase.
+        let write_scope = handoff
+            .metadata
+            .as_ref()
+            .map_or(&[] as &[String], |m| m.allowed_write_scope.as_slice());
         let required_capabilities = CapabilityRequirements {
             tier: phase.agent_tier.to_string(),
-            tools: vec!["bash".to_string(), "read".to_string(), "write".to_string()],
+            tools: tools_for_write_scope(write_scope),
         };
         let goal = format!(
             "Execute the '{}' phase ({}) for handoff: {}",
@@ -314,12 +319,44 @@ fn truncate_rendered_context(text: &str, token_budget: usize) -> String {
 // Packet helpers
 // ---------------------------------------------------------------------------
 
+/// Source patterns that indicate write access to source code is needed.
+const SOURCE_PATTERNS: &[&str] = &["src/", ".rs", ".ts", ".py", ".js", "lib/"];
+
+/// Derive the tool list for a phase based on the handoff's allowed write scope.
+///
+/// If any write scope path contains a source-code pattern, the worker needs
+/// full write access. Otherwise read-only access is sufficient.
+fn tools_for_write_scope(allowed_write_scope: &[String]) -> Vec<String> {
+    let needs_write = allowed_write_scope
+        .iter()
+        .any(|path| SOURCE_PATTERNS.iter().any(|pat| path.contains(pat)));
+    let mut tools = vec!["bash".to_string(), "read".to_string()];
+    if needs_write {
+        tools.push("write".to_string());
+    }
+    tools
+}
+
 /// Build constraint strings from the handoff metadata.
 fn build_constraints(handoff: &ParsedHandoff) -> Vec<String> {
     let mut constraints = Vec::new();
     if let Some(meta) = &handoff.metadata {
         for scope in &meta.allowed_write_scope {
             constraints.push(format!("Write scope limited to {}", scope));
+        }
+        // For read-only source tasks that can write artifacts, surface the boundary explicitly.
+        if !meta.allowed_write_scope.is_empty() {
+            let has_source_write = meta
+                .allowed_write_scope
+                .iter()
+                .any(|p| SOURCE_PATTERNS.iter().any(|pat| p.contains(pat)));
+            if !has_source_write {
+                let paths = meta.allowed_write_scope.join(", ");
+                constraints.push(format!(
+                    "Source code is read-only; artifact writes allowed at: {}",
+                    paths
+                ));
+            }
         }
         for goal in &meta.non_goals {
             constraints.push(format!("Non-goal (do not implement): {}", goal));
@@ -679,6 +716,240 @@ mod tests {
         assert_eq!(
             dispatch_focus_topic(&template).as_deref(),
             Some("implement implementer")
+        );
+    }
+
+    // -- task packet quality tests (H5) ---------------------------------------
+
+    #[test]
+    fn dispatch_subtask_title_includes_handoff_title_and_separator() {
+        use std::cell::RefCell;
+
+        struct TitleCapturingMock {
+            inner: MockCanopyClient,
+            subtask_titles: RefCell<Vec<String>>,
+        }
+
+        impl TitleCapturingMock {
+            fn new() -> Self {
+                Self {
+                    inner: MockCanopyClient::new(),
+                    subtask_titles: RefCell::new(Vec::new()),
+                }
+            }
+        }
+
+        use crate::dispatch::{
+            CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail,
+        };
+
+        impl CanopyClient for TitleCapturingMock {
+            fn create_task(
+                &self,
+                title: &str,
+                description: &str,
+                project_root: &str,
+                options: &TaskOptions,
+            ) -> Result<String, DispatchError> {
+                self.inner.create_task(title, description, project_root, options)
+            }
+
+            fn create_subtask(
+                &self,
+                parent_id: &str,
+                title: &str,
+                description: &str,
+                options: &TaskOptions,
+            ) -> Result<String, DispatchError> {
+                self.subtask_titles.borrow_mut().push(title.to_string());
+                self.inner.create_subtask(parent_id, title, description, options)
+            }
+
+            fn assign_task(
+                &self,
+                task_id: &str,
+                agent_id: &str,
+                assigned_by: &str,
+            ) -> Result<(), DispatchError> {
+                self.inner.assign_task(task_id, agent_id, assigned_by)
+            }
+
+            fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
+                self.inner.get_task(task_id)
+            }
+
+            fn check_completeness(
+                &self,
+                handoff_path: &str,
+            ) -> Result<CompletenessReport, DispatchError> {
+                self.inner.check_completeness(handoff_path)
+            }
+
+            fn import_handoff(
+                &self,
+                path: &str,
+                assign_to: Option<&str>,
+            ) -> Result<ImportResult, DispatchError> {
+                self.inner.import_handoff(path, assign_to)
+            }
+        }
+
+        let capturing = TitleCapturingMock::new();
+        let template = impl_audit_default();
+        let handoff = test_handoff(); // title: "Canopy Dispatch Integration"
+
+        dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("wf-title-1".to_string()),
+            "/handoffs/test.md",
+            &capturing,
+        )
+        .expect("dispatch should succeed");
+
+        let titles = capturing.subtask_titles.borrow();
+        assert_eq!(titles.len(), 2, "impl-audit has 2 phases");
+
+        // Each title should contain the phase_id, the em-dash separator, and the handoff title.
+        for title in titles.iter() {
+            assert!(
+                title.contains('\u{2014}'),
+                "title missing em-dash separator: {title}"
+            );
+            assert!(
+                title.contains("Canopy Dispatch Integration"),
+                "title missing handoff title: {title}"
+            );
+        }
+
+        // Spot-check the first phase title format.
+        assert!(
+            titles[0].starts_with("[implementer] implement"),
+            "unexpected first title: {}",
+            titles[0]
+        );
+    }
+
+    #[test]
+    fn non_goals_constraint_preserves_commas() {
+        let handoff = ParsedHandoff {
+            title: "Test".to_string(),
+            metadata: Some(crate::parser::HandoffMetadata {
+                dispatchability: crate::parser::Dispatchability::Direct,
+                owning_repo: "hymenium".to_string(),
+                allowed_write_scope: vec![],
+                cross_repo_rule: None,
+                non_goals: vec!["no foo, bar, or baz".to_string()],
+                verification_contract: String::new(),
+                completion_update: String::new(),
+                source_scope: None,
+            }),
+            problem: "p".to_string(),
+            state: vec![],
+            intent: "i".to_string(),
+            steps: vec![],
+            completion_protocol: None,
+            context: None,
+        };
+
+        let constraints = build_constraints(&handoff);
+
+        // Non-goal with commas must appear as a single constraint, not split.
+        let non_goal_constraints: Vec<_> = constraints
+            .iter()
+            .filter(|c| c.starts_with("Non-goal"))
+            .collect();
+        assert_eq!(
+            non_goal_constraints.len(),
+            1,
+            "expected exactly one non-goal constraint, got: {:?}",
+            non_goal_constraints
+        );
+        assert_eq!(
+            non_goal_constraints[0],
+            "Non-goal (do not implement): no foo, bar, or baz"
+        );
+    }
+
+    #[test]
+    fn tools_for_write_scope_docs_only_excludes_write() {
+        let scope = vec!["docs/".to_string()];
+        let tools = tools_for_write_scope(&scope);
+        assert!(
+            !tools.contains(&"write".to_string()),
+            "docs-only scope should not include write, got: {tools:?}"
+        );
+        assert!(tools.contains(&"bash".to_string()));
+        assert!(tools.contains(&"read".to_string()));
+    }
+
+    #[test]
+    fn tools_for_write_scope_src_includes_write() {
+        let scope = vec!["src/".to_string()];
+        let tools = tools_for_write_scope(&scope);
+        assert!(
+            tools.contains(&"write".to_string()),
+            "src/ scope should include write, got: {tools:?}"
+        );
+    }
+
+    #[test]
+    fn tools_for_write_scope_rs_extension_includes_write() {
+        let scope = vec!["hymenium/src/dispatch/orchestrate.rs".to_string()];
+        let tools = tools_for_write_scope(&scope);
+        assert!(
+            tools.contains(&"write".to_string()),
+            ".rs scope should include write, got: {tools:?}"
+        );
+    }
+
+    #[test]
+    fn tools_for_write_scope_empty_excludes_write() {
+        let tools = tools_for_write_scope(&[]);
+        assert!(
+            !tools.contains(&"write".to_string()),
+            "empty scope should not include write, got: {tools:?}"
+        );
+    }
+
+    #[test]
+    fn artifact_boundary_constraint_added_for_read_only_source_task() {
+        let handoff = ParsedHandoff {
+            title: "Read-only audit task".to_string(),
+            metadata: Some(crate::parser::HandoffMetadata {
+                dispatchability: crate::parser::Dispatchability::Direct,
+                owning_repo: "hymenium".to_string(),
+                allowed_write_scope: vec!["docs/audit/".to_string()],
+                cross_repo_rule: None,
+                non_goals: vec![],
+                verification_contract: String::new(),
+                completion_update: String::new(),
+                source_scope: None,
+            }),
+            problem: "p".to_string(),
+            state: vec![],
+            intent: "i".to_string(),
+            steps: vec![],
+            completion_protocol: None,
+            context: None,
+        };
+
+        let constraints = build_constraints(&handoff);
+
+        let boundary: Vec<_> = constraints
+            .iter()
+            .filter(|c| c.starts_with("Source code is read-only"))
+            .collect();
+        assert_eq!(
+            boundary.len(),
+            1,
+            "expected exactly one artifact boundary constraint, got: {:?}",
+            constraints
+        );
+        assert!(
+            boundary[0].contains("docs/audit/"),
+            "boundary constraint should include the artifact path: {}",
+            boundary[0]
         );
     }
 

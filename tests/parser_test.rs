@@ -375,3 +375,22 @@ fn test_centralcommand_fixture_parses() {
     let protocol = handoff.completion_protocol.unwrap();
     assert!(protocol.contains("complete"));
 }
+
+#[test]
+fn test_non_goals_preserved_as_single_item() {
+    let content = "# Non-Goals Parsing\n\n## Handoff Metadata\n- **Dispatch:** `direct`\n- **Owning repo:** `hymenium`\n- **Allowed write scope:** `src/`\n- **Non-goals:** no foo, bar, or baz\n- **Verification contract:** cargo test\n- **Completion update:** mark done\n\n## Problem\nSome problem.\n\n## What needs doing\nSome intent.\n\n### Step 1: Do the thing\nDescription here.\n\n#### Verification\n```bash\ncargo test\n```\n";
+
+    let result = parse_handoff(content);
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+
+    let handoff = result.unwrap();
+    let metadata = handoff.metadata.expect("metadata should be present");
+
+    // The non-goals value contains commas but must remain a single item, not be split.
+    assert_eq!(
+        metadata.non_goals,
+        vec!["no foo, bar, or baz"],
+        "non_goals should be a single item preserving commas, got: {:?}",
+        metadata.non_goals
+    );
+}

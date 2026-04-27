@@ -210,7 +210,12 @@ fn extract_metadata(lines: &[&str]) -> Option<HandoffMetadata> {
                     metadata.cross_repo_rule = Some(value.1);
                 }
                 "Non-goals" => {
-                    metadata.non_goals = split_list(&value.1);
+                    let raw = value.1.trim();
+                    if raw.is_empty() {
+                        metadata.non_goals = Vec::new();
+                    } else {
+                        metadata.non_goals = vec![raw.to_string()];
+                    }
                 }
                 "Verification contract" => {
                     metadata.verification_contract = value.1;
@@ -239,13 +244,6 @@ fn parse_metadata_line(line: &str) -> Option<(String, String)> {
 
 fn split_scope(s: &str) -> Vec<&str> {
     s.split(',').map(str::trim).collect()
-}
-
-fn split_list(s: &str) -> Vec<String> {
-    s.split(',')
-        .map(|item| item.trim().to_string())
-        .filter(|item| !item.is_empty())
-        .collect()
 }
 
 fn section_name_for_type(section_type: SectionType) -> String {
