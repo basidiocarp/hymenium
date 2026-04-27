@@ -33,6 +33,42 @@ pub fn run(workflow_id: &str, store: &WorkflowStore) -> Result<(), CompleteComma
         .get_workflow(&id)?
         .ok_or_else(|| CompleteCommandError::NotFound(workflow_id.to_string()))?;
 
+    // Already-terminal guard: if the workflow is already in a terminal status,
+    // return an informative no-op instead of overwriting the outcome.
+    match instance.status {
+        WorkflowStatus::Completed => {
+            let ts = store
+                .get_outcome(&id)?
+                .map_or_else(|| "unknown".to_string(), |o| o.completed_at.to_rfc3339());
+            println!(
+                "Workflow {} already completed at {}. No change.",
+                workflow_id, ts
+            );
+            return Ok(());
+        }
+        WorkflowStatus::Cancelled => {
+            let ts = store
+                .get_outcome(&id)?
+                .map_or_else(|| "unknown".to_string(), |o| o.completed_at.to_rfc3339());
+            println!(
+                "Workflow {} was cancelled at {}. Outcome preserved.",
+                workflow_id, ts
+            );
+            return Ok(());
+        }
+        WorkflowStatus::Failed => {
+            let ts = store
+                .get_outcome(&id)?
+                .map_or_else(|| "unknown".to_string(), |o| o.completed_at.to_rfc3339());
+            println!(
+                "Workflow {} failed at {}. Outcome preserved.",
+                workflow_id, ts
+            );
+            return Ok(());
+        }
+        _ => {}
+    }
+
     // Call the engine method to complete the workflow.
     // This mutates `instance` to set status to Completed.
     instance.complete_workflow()?;
@@ -208,5 +244,103 @@ mod tests {
             "current_phase_idx must reflect phase 1 after complete"
         );
         assert_eq!(loaded.status, WorkflowStatus::Completed);
+    }
+
+    /// Guard: completing an already-completed workflow is a no-op (exits Ok,
+    /// does not overwrite the existing outcome).
+    #[test]
+    fn complete_already_completed_is_noop() {
+        let store = temp_store();
+        let workflow_id =
+            insert_final_phase_completed_workflow(&store, "01COMPLNOOP000000000000001");
+
+        // First complete — transitions the workflow.
+        run(workflow_id.0.as_str(), &store).expect("first complete should succeed");
+
+        // Second complete — should be a no-op.
+        run(workflow_id.0.as_str(), &store).expect("second complete should succeed (noop)");
+
+        // Outcome is still present and still Completed.
+        let outcome = store
+            .get_outcome(&workflow_id)
+            .expect("get_outcome")
+            .expect("outcome should exist");
+        assert_eq!(
+            outcome.terminal_status,
+            TerminalStatus::Completed,
+            "terminal_status must remain Completed after noop"
+        );
+    }
+
+    /// Guard: completing a cancelled workflow is a no-op (exits Ok, preserves
+    /// the Cancelled outcome).
+    #[test]
+    fn complete_cancelled_workflow_preserves_outcome() {
+        use crate::commands::cancel;
+
+        let store = temp_store();
+        // Insert a pending workflow (cancel works on pending workflows).
+        let workflow_id = WorkflowId("01COMPLCNCL000000000000001".to_string());
+        let inst = WorkflowInstance::new(
+            workflow_id.clone(),
+            crate::workflow::template::impl_audit_default(),
+            "/handoffs/test.md",
+        );
+        store.insert_workflow(&inst).expect("insert workflow");
+
+        // Cancel the workflow.
+        cancel::run(workflow_id.0.as_str(), &store).expect("cancel should succeed");
+
+        // Now try to complete it — guard should fire and return Ok.
+        run(workflow_id.0.as_str(), &store)
+            .expect("complete on cancelled workflow should return Ok (noop)");
+
+        // Outcome is still Cancelled.
+        let outcome = store
+            .get_outcome(&workflow_id)
+            .expect("get_outcome")
+            .expect("outcome should exist");
+        assert_eq!(
+            outcome.terminal_status,
+            TerminalStatus::Cancelled,
+            "terminal_status must remain Cancelled after noop"
+        );
+    }
+
+    /// Guard: completing a failed workflow is a no-op (exits Ok, preserves
+    /// the Failed outcome).
+    #[test]
+    fn complete_failed_workflow_preserves_outcome() {
+        use crate::commands::fail;
+
+        let store = temp_store();
+        // Insert a workflow in active state so we can fail it.
+        let workflow_id = WorkflowId("01COMPLFAIL000000000000001".to_string());
+        let mut inst = WorkflowInstance::new(
+            workflow_id.clone(),
+            crate::workflow::template::impl_audit_default(),
+            "/handoffs/test.md",
+        );
+        inst.start_phase().expect("start phase");
+        store.insert_workflow(&inst).expect("insert workflow");
+
+        // Fail the workflow.
+        fail::run(workflow_id.0.as_str(), "deliberate failure", &store)
+            .expect("fail should succeed");
+
+        // Now try to complete it — guard should fire and return Ok.
+        run(workflow_id.0.as_str(), &store)
+            .expect("complete on failed workflow should return Ok (noop)");
+
+        // Outcome is still Failed.
+        let outcome = store
+            .get_outcome(&workflow_id)
+            .expect("get_outcome")
+            .expect("outcome should exist");
+        assert_eq!(
+            outcome.terminal_status,
+            TerminalStatus::Failed,
+            "terminal_status must remain Failed after noop"
+        );
     }
 }
