@@ -219,6 +219,64 @@ impl GateEvaluator for MockGateEvaluator {
     }
 }
 
+/// A gate evaluator backed by real `TaskDetail` evidence fields.
+///
+/// Evaluates `CodeDiffExists` and `VerificationPassed` by inspecting the
+/// provided task detail, rather than returning hardcoded values. Useful for
+/// integration tests that want to prove the gate actually checks evidence state.
+#[derive(Debug, Clone)]
+pub struct EvidenceGateEvaluator {
+    task: crate::dispatch::TaskDetail,
+}
+
+impl EvidenceGateEvaluator {
+    pub fn new(task: crate::dispatch::TaskDetail) -> Self {
+        Self { task }
+    }
+}
+
+impl GateEvaluator for EvidenceGateEvaluator {
+    fn evaluate(
+        &self,
+        condition: &GateCondition,
+        _context: &GateContext,
+    ) -> GateResult<ConditionEvaluation> {
+        let (passed, reason) = match condition {
+            GateCondition::CodeDiffExists => (
+                self.task.has_code_diff,
+                if self.task.has_code_diff {
+                    "code diff is present".to_string()
+                } else {
+                    "no code diff recorded for this task".to_string()
+                },
+            ),
+            GateCondition::VerificationPassed => (
+                self.task.has_verification_passed,
+                if self.task.has_verification_passed {
+                    "verification evidence is present and passed".to_string()
+                } else {
+                    "no passing verification evidence for this task".to_string()
+                },
+            ),
+            // For conditions not yet backed by evidence fields, default to
+            // conservative pass to avoid blocking non-evidence gates.
+            GateCondition::AuditClean | GateCondition::FindingsResolved => (
+                true,
+                "structural gate — not evidence-backed".to_string(),
+            ),
+            GateCondition::Custom(name) => (
+                false,
+                format!("unknown custom condition '{name}' — defaulting to blocked"),
+            ),
+        };
+        Ok(ConditionEvaluation {
+            condition: condition.clone(),
+            passed,
+            reason,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

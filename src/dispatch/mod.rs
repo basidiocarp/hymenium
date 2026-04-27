@@ -103,6 +103,12 @@ pub struct TaskDetail {
     /// Capability requirements recorded at task-create time (empty = any agent).
     #[serde(default)]
     pub required_capabilities: Vec<String>,
+    /// True if a code diff has been recorded for this task.
+    #[serde(default)]
+    pub has_code_diff: bool,
+    /// True if verification evidence has been attached and passed.
+    #[serde(default)]
+    pub has_verification_passed: bool,
 }
 
 /// Report from a completeness check on a handoff.

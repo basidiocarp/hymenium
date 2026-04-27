@@ -57,6 +57,14 @@ impl MockCanopyClient {
         self.descriptions.borrow().get(id).cloned()
     }
 
+    /// Set evidence fields on an existing task (test helper).
+    pub fn set_evidence(&self, task_id: &str, has_code_diff: bool, has_verification_passed: bool) {
+        if let Some(task) = self.tasks.borrow_mut().get_mut(task_id) {
+            task.has_code_diff = has_code_diff;
+            task.has_verification_passed = has_verification_passed;
+        }
+    }
+
     fn next_task_id(&self) -> String {
         let mut id = self.next_id.borrow_mut();
         let task_id = format!("mock-task-{id}");
@@ -87,6 +95,8 @@ impl CanopyClient for MockCanopyClient {
             agent_id: None,
             parent_id: None,
             required_capabilities: options.required_capabilities.clone(),
+            has_code_diff: false,
+            has_verification_passed: false,
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
         self.descriptions
@@ -115,6 +125,8 @@ impl CanopyClient for MockCanopyClient {
             agent_id: None,
             parent_id: Some(parent_id.to_string()),
             required_capabilities: options.required_capabilities.clone(),
+            has_code_diff: false,
+            has_verification_passed: false,
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
         self.descriptions
@@ -163,6 +175,8 @@ impl CanopyClient for MockCanopyClient {
             agent_id: assign_to.map(String::from),
             parent_id: None,
             required_capabilities: Vec::new(),
+            has_code_diff: false,
+            has_verification_passed: false,
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
         self.descriptions

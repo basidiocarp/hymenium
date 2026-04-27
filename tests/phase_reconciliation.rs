@@ -81,6 +81,8 @@ impl CanopyClient for StatusMock {
             agent_id: None,
             parent_id: None,
             required_capabilities: vec![],
+            has_code_diff: false,
+            has_verification_passed: false,
         })
     }
 

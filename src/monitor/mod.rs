@@ -244,6 +244,8 @@ pub(super) mod test_helpers {
             agent_id: Some("agent-1".to_string()),
             parent_id: None,
             required_capabilities: Vec::new(),
+            has_code_diff: false,
+            has_verification_passed: false,
         }
     }
 
