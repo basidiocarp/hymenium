@@ -649,6 +649,7 @@ mod tests {
             non_goals: Vec::new(),
             verification_contract: "cargo test".to_string(),
             completion_update: String::new(),
+            source_scope: None,
         });
 
         let instance = dispatch_workflow(
@@ -725,6 +726,7 @@ mod tests {
             non_goals: Vec::new(),
             verification_contract: "cargo test".to_string(),
             completion_update: String::new(),
+            source_scope: None,
         });
 
         dispatch_workflow(
@@ -796,6 +798,7 @@ mod tests {
             non_goals: Vec::new(),
             verification_contract: String::new(),
             completion_update: String::new(),
+            source_scope: None,
         });
 
         dispatch_workflow(
@@ -835,6 +838,7 @@ mod tests {
             non_goals: Vec::new(),
             verification_contract: String::new(),
             completion_update: String::new(),
+            source_scope: None,
         });
 
         let actual_path = "/home/user/.handoffs/ccoCentralCommand/task.md";

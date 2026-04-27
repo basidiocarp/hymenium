@@ -253,3 +253,125 @@ fn test_missing_steps_fails() {
     let result = parse_handoff(bad_content);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_heading_aliases_what_needs_doing() {
+    // Test that "## What needs doing" (without parenthetical) works like the verbose form
+    let content = r#"# Test Heading Aliases
+
+## Problem
+Some problem here.
+
+## What needs doing
+Some intent here.
+
+### Step 1: Test step
+Description of step 1.
+
+#### Verification
+```bash
+echo "test"
+```
+"#;
+
+    let result = parse_handoff(content);
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+
+    let handoff = result.unwrap();
+    assert_eq!(handoff.title, "Test Heading Aliases");
+    assert!(!handoff.problem.is_empty());
+    assert!(!handoff.intent.is_empty());
+    assert_eq!(handoff.steps.len(), 1);
+}
+
+#[test]
+fn test_heading_case_insensitive() {
+    // Test that case-insensitive matching works
+    let content = r#"# Test Case Insensitivity
+
+## PROBLEM
+Some problem text.
+
+## WHAT NEEDS DOING
+Some intent text.
+
+### Step 1: Test step
+Description.
+
+#### Verification
+```bash
+echo "test"
+```
+"#;
+
+    let result = parse_handoff(content);
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+
+    let handoff = result.unwrap();
+    assert_eq!(handoff.title, "Test Case Insensitivity");
+    assert!(!handoff.problem.is_empty());
+    assert!(!handoff.intent.is_empty());
+}
+
+#[test]
+fn test_missing_section_error_lists_aliases() {
+    // Test that missing section error includes accepted aliases
+    let bad_content = "# Title\n\n## What needs doing\n\nIntent";
+    let result = parse_handoff(bad_content);
+    assert!(result.is_err());
+
+    let err = result.unwrap_err();
+    let error_str = format!("{}", err);
+    // Error message should contain multiple accepted headings for Problem section
+    assert!(error_str.contains("Problem"), "Error should mention 'Problem' section");
+    assert!(error_str.contains("accepted headings"), "Error should list accepted headings");
+}
+
+#[test]
+fn test_centralcommand_fixture_parses() {
+    let content = include_str!("fixtures/centralcommand-umbrella.md");
+    let result = parse_handoff(content);
+    assert!(result.is_ok(), "Parse failed: {:?}", result.err());
+
+    let handoff = result.unwrap();
+
+    // Verify title
+    assert_eq!(handoff.title, "Central Command: Multi-Project Coordination");
+
+    // Verify metadata was extracted
+    assert!(handoff.metadata.is_some());
+    let metadata = handoff.metadata.unwrap();
+    assert_eq!(metadata.dispatchability, Dispatchability::Umbrella);
+    assert_eq!(metadata.owning_repo, "canopy");
+    assert!(!metadata.allowed_write_scope.is_empty());
+
+    // Verify source_scope was parsed
+    assert!(metadata.source_scope.is_some(), "source_scope should be parsed");
+    let source_scope = metadata.source_scope.unwrap();
+    assert!(!source_scope.is_empty(), "source_scope should not be empty");
+
+    // Verify problem section
+    assert!(!handoff.problem.is_empty());
+    assert!(handoff.problem.contains("ecosystem"));
+
+    // Verify intent
+    assert!(!handoff.intent.is_empty());
+
+    // Verify steps were extracted
+    assert!(!handoff.steps.is_empty());
+    assert_eq!(handoff.steps.len(), 3);
+
+    // Verify first step
+    let step1 = &handoff.steps[0];
+    assert_eq!(step1.number, 1);
+    assert!(step1.title.contains("Canopy"));
+    assert_eq!(step1.project, Some("canopy/".to_string()));
+
+    // Verify verification block
+    assert!(step1.verification.is_some());
+
+    // Verify completion protocol
+    assert!(handoff.completion_protocol.is_some());
+    let protocol = handoff.completion_protocol.unwrap();
+    assert!(protocol.contains("complete"));
+}

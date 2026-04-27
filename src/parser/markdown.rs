@@ -7,20 +7,121 @@ use crate::parser::{
     ChecklistItem, Dispatchability, FileModification, HandoffMetadata, ParseError, ParsedHandoff,
     ParsedStep, PasteMarker, VerificationBlock,
 };
+use std::collections::HashMap;
+
+/// Internal section types for heading matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum SectionType {
+    Problem,
+    WhatExists,
+    WhatNeedsDoing,
+    CompletionProtocol,
+    Context,
+}
+
+/// Build a map of normalized headings to section types and their accepted aliases.
+fn build_section_aliases() -> HashMap<String, (SectionType, Vec<String>)> {
+    let mut aliases = HashMap::new();
+
+    // Problem section
+    let problem_aliases = vec!["## Problem".to_string()];
+    for alias in &problem_aliases {
+        aliases.insert(normalize_heading(alias), (SectionType::Problem, problem_aliases.clone()));
+    }
+
+    // What exists section
+    let what_exists_aliases = vec![
+        "## What exists".to_string(),
+        "## What exists (state)".to_string(),
+    ];
+    for alias in &what_exists_aliases {
+        aliases.insert(normalize_heading(alias), (SectionType::WhatExists, what_exists_aliases.clone()));
+    }
+
+    // What needs doing section
+    let what_needs_aliases = vec![
+        "## What needs doing".to_string(),
+        "## What needs doing (intent)".to_string(),
+    ];
+    for alias in &what_needs_aliases {
+        aliases.insert(normalize_heading(alias), (SectionType::WhatNeedsDoing, what_needs_aliases.clone()));
+    }
+
+    // Completion Protocol section
+    let completion_aliases = vec!["## Completion Protocol".to_string()];
+    for alias in &completion_aliases {
+        aliases.insert(normalize_heading(alias), (SectionType::CompletionProtocol, completion_aliases.clone()));
+    }
+
+    // Context section
+    let context_aliases = vec!["## Context".to_string()];
+    for alias in &context_aliases {
+        aliases.insert(normalize_heading(alias), (SectionType::Context, context_aliases.clone()));
+    }
+
+    aliases
+}
+
+/// Normalize a heading for case-insensitive matching, stripping parenthetical suffixes.
+fn normalize_heading(heading: &str) -> String {
+    let heading = heading.trim();
+    // Strip leading "## "
+    let heading = heading.strip_prefix("## ").unwrap_or(heading);
+    // Strip trailing parenthetical (e.g., " (intent)")
+    let heading = if let Some(paren_idx) = heading.rfind('(') {
+        heading[..paren_idx].trim()
+    } else {
+        heading
+    };
+    heading.to_lowercase()
+}
+
+/// Check if a line matches a section heading (case-insensitive, alias-aware).
+fn matches_section(line: &str, section_type: SectionType, aliases: &HashMap<String, (SectionType, Vec<String>)>) -> bool {
+    let normalized = normalize_heading(line);
+    if let Some((matched_type, _)) = aliases.get(&normalized) {
+        *matched_type == section_type
+    } else {
+        false
+    }
+}
+
+/// Get the list of accepted heading aliases for a section type (used in error messages).
+///
+/// **Keep in sync with `build_section_aliases()`** — both define the accepted heading
+/// set for each section. Adding an alias to one without updating the other will produce
+/// error messages that list stale accepted headings while matching silently fails or
+/// accepts the wrong form.
+fn get_aliases_for_section(section_type: SectionType) -> Vec<String> {
+    match section_type {
+        SectionType::Problem => vec!["## Problem".to_string()],
+        SectionType::WhatExists => vec![
+            "## What exists".to_string(),
+            "## What exists (state)".to_string(),
+        ],
+        SectionType::WhatNeedsDoing => vec![
+            "## What needs doing".to_string(),
+            "## What needs doing (intent)".to_string(),
+        ],
+        SectionType::CompletionProtocol => vec!["## Completion Protocol".to_string()],
+        SectionType::Context => vec!["## Context".to_string()],
+    }
+}
 
 /// Parse a handoff markdown document into structured data.
 #[allow(clippy::similar_names)] // content (input) vs context (section) are clear in usage
 pub fn parse_handoff(content: &str) -> Result<ParsedHandoff, ParseError> {
     let lines: Vec<&str> = content.lines().collect();
+    let aliases = build_section_aliases();
 
     let title = extract_title(&lines)?;
     let metadata = extract_metadata(&lines);
-    let problem = extract_section(&lines, "## Problem")?;
-    let state = extract_list_section(&lines, "## What exists (state)");
-    let intent = extract_section(&lines, "## What needs doing (intent)")?;
+    let problem = extract_section_by_type(&lines, SectionType::Problem, &aliases)?;
+    let state = extract_list_section_by_type(&lines, SectionType::WhatExists, &aliases);
+    let intent = extract_section_by_type(&lines, SectionType::WhatNeedsDoing, &aliases)?;
     let steps = extract_steps(&lines)?;
-    let completion_protocol = extract_section(&lines, "## Completion Protocol").ok();
-    let context = extract_section(&lines, "## Context").ok();
+    let completion_protocol = extract_section_by_type(&lines, SectionType::CompletionProtocol, &aliases).ok();
+    let context = extract_section_by_type(&lines, SectionType::Context, &aliases).ok();
 
     Ok(ParsedHandoff {
         title,
@@ -40,7 +141,10 @@ fn extract_title(lines: &[&str]) -> Result<String, ParseError> {
             return Ok(title.trim().to_string());
         }
     }
-    Err(ParseError::MissingSection("title (# ...)".to_string()))
+    Err(ParseError::MissingSection(
+        "title".to_string(),
+        vec!["# Title".to_string()],
+    ))
 }
 
 fn extract_metadata(lines: &[&str]) -> Option<HandoffMetadata> {
@@ -74,6 +178,7 @@ fn extract_metadata(lines: &[&str]) -> Option<HandoffMetadata> {
         non_goals: Vec::new(),
         verification_contract: String::new(),
         completion_update: String::new(),
+        source_scope: None,
     };
 
     for line in metadata_lines {
@@ -94,6 +199,12 @@ fn extract_metadata(lines: &[&str]) -> Option<HandoffMetadata> {
                         .into_iter()
                         .map(std::string::ToString::to_string)
                         .collect();
+                }
+                "Source read scope" | "Read scope" => {
+                    metadata.source_scope = Some(split_scope(&value.1)
+                        .into_iter()
+                        .map(std::string::ToString::to_string)
+                        .collect());
                 }
                 "Cross-repo edits" if !value.1.to_lowercase().contains("none") => {
                     metadata.cross_repo_rule = Some(value.1);
@@ -137,13 +248,27 @@ fn split_list(s: &str) -> Vec<String> {
         .collect()
 }
 
-fn extract_section(lines: &[&str], section_heading: &str) -> Result<String, ParseError> {
+fn section_name_for_type(section_type: SectionType) -> String {
+    match section_type {
+        SectionType::Problem => "Problem".to_string(),
+        SectionType::WhatExists => "What exists".to_string(),
+        SectionType::WhatNeedsDoing => "What needs doing".to_string(),
+        SectionType::CompletionProtocol => "Completion Protocol".to_string(),
+        SectionType::Context => "Context".to_string(),
+    }
+}
+
+fn extract_section_by_type(
+    lines: &[&str],
+    section_type: SectionType,
+    aliases: &HashMap<String, (SectionType, Vec<String>)>,
+) -> Result<String, ParseError> {
     let mut result = Vec::new();
     let mut in_section = false;
     let mut in_code_block = false;
 
     for line in lines {
-        if *line == section_heading {
+        if matches_section(line, section_type, aliases) {
             in_section = true;
             continue;
         }
@@ -167,18 +292,25 @@ fn extract_section(lines: &[&str], section_heading: &str) -> Result<String, Pars
 
     let text = result.join("\n").trim().to_string();
     if text.is_empty() {
-        Err(ParseError::MissingSection(section_heading.to_string()))
+        Err(ParseError::MissingSection(
+            section_name_for_type(section_type),
+            get_aliases_for_section(section_type),
+        ))
     } else {
         Ok(text)
     }
 }
 
-fn extract_list_section(lines: &[&str], section_heading: &str) -> Vec<String> {
+fn extract_list_section_by_type(
+    lines: &[&str],
+    section_type: SectionType,
+    aliases: &HashMap<String, (SectionType, Vec<String>)>,
+) -> Vec<String> {
     let mut result = Vec::new();
     let mut in_section = false;
 
     for line in lines {
-        if *line == section_heading {
+        if matches_section(line, section_type, aliases) {
             in_section = true;
             continue;
         }
@@ -218,6 +350,7 @@ fn extract_list_section(lines: &[&str], section_heading: &str) -> Vec<String> {
     result
 }
 
+
 fn extract_steps(lines: &[&str]) -> Result<Vec<ParsedStep>, ParseError> {
     let mut steps = Vec::new();
 
@@ -235,7 +368,10 @@ fn extract_steps(lines: &[&str]) -> Result<Vec<ParsedStep>, ParseError> {
     }
 
     if steps.is_empty() {
-        return Err(ParseError::MissingSection("### Step N: ...".to_string()));
+        return Err(ParseError::MissingSection(
+            "steps".to_string(),
+            vec!["### Step 1: ...".to_string(), "### Step N: ...".to_string()],
+        ));
     }
 
     Ok(steps)

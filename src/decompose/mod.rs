@@ -577,6 +577,7 @@ mod tests {
             non_goals: Vec::new(),
             verification_contract: "cargo test".to_string(),
             completion_update: "update handoff".to_string(),
+            source_scope: None,
         };
 
         let md = render_piece(&piece, "Parent", Some(&meta));

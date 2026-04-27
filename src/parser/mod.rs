@@ -15,9 +15,9 @@ pub use markdown::parse_handoff;
 /// Error type for handoff parsing.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ParseError {
-    /// Missing required section
-    #[error("missing required section: {0}")]
-    MissingSection(String),
+    /// Missing required section with list of accepted aliases
+    #[error("{}", format_missing_section_error(.0, .1))]
+    MissingSection(String, Vec<String>),
     /// Invalid metadata format
     #[error("invalid metadata: {0}")]
     InvalidMetadata(String),
@@ -27,6 +27,22 @@ pub enum ParseError {
     /// Malformed code block or list
     #[error("malformed block: {0}")]
     MalformedBlock(String),
+}
+
+fn format_missing_section_error(section: &str, aliases: &[String]) -> String {
+    let aliases_str = if aliases.is_empty() {
+        String::new()
+    } else if aliases.len() == 1 {
+        format!("'{}'", aliases[0])
+    } else {
+        let quoted: Vec<String> = aliases.iter().map(|a| format!("'{}'", a)).collect();
+        quoted.join(", ")
+    };
+
+    format!(
+        "missing required section '{}' — accepted headings: {}",
+        section, aliases_str
+    )
 }
 
 /// Dispatch type for a handoff.
@@ -61,6 +77,7 @@ pub struct HandoffMetadata {
     pub non_goals: Vec<String>,
     pub verification_contract: String,
     pub completion_update: String,
+    pub source_scope: Option<Vec<String>>,
 }
 
 /// A single step within a handoff.

@@ -47,6 +47,16 @@ enum Commands {
         #[arg(value_name = "WORKFLOW_ID")]
         workflow_id: String,
     },
+
+    /// Reconcile workflow phases against Canopy task statuses
+    ///
+    /// Checks each active phase's Canopy task and advances the workflow
+    /// if Canopy reports completion. Safe to call repeatedly (idempotent).
+    Reconcile {
+        /// Workflow ID to reconcile
+        #[arg(value_name = "WORKFLOW_ID")]
+        workflow_id: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -82,6 +92,12 @@ fn main() -> Result<()> {
             let store = open_store()?;
             hymenium::commands::cancel::run(&workflow_id, &store)
                 .with_context(|| format!("cancel failed for {workflow_id}"))?;
+        }
+
+        Commands::Reconcile { workflow_id } => {
+            let store = open_store()?;
+            hymenium::commands::reconcile::run(&workflow_id, &store)
+                .with_context(|| format!("reconcile failed for {workflow_id}"))?;
         }
     }
 

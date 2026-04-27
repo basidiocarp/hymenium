@@ -249,6 +249,87 @@ impl WorkflowInstance {
         Ok(())
     }
 
+    /// Mark the current phase completed regardless of whether it was started.
+    ///
+    /// Used by reconciliation to catch up a phase that Canopy reports as
+    /// completed but whose in-memory state may still be `Pending` because
+    /// Hymenium never received the start signal. Transitions `Pending` or
+    /// `Active` → `Completed` atomically, setting both timestamps when the
+    /// phase was previously `Pending`.
+    ///
+    /// Returns an error if the current phase is already `Completed`, `Failed`,
+    /// or `Skipped` — those are terminal states that must not be overwritten.
+    pub fn reconcile_complete_current_phase(&mut self) -> WorkflowEngineResult<()> {
+        let phase = self
+            .current_phase_mut()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
+
+        match phase.status {
+            PhaseStatus::Pending => {
+                // Phase was never started locally; set both timestamps now.
+                phase.mark_active();
+                phase.mark_completed();
+            }
+            PhaseStatus::Active => {
+                phase.mark_completed();
+            }
+            PhaseStatus::Completed => {
+                // Already completed — idempotent, nothing to do.
+            }
+            PhaseStatus::Failed | PhaseStatus::Skipped => {
+                return Err(WorkflowError::StateError(format!(
+                    "cannot reconcile-complete phase {} from terminal status {:?}",
+                    phase.phase_id, phase.status
+                )));
+            }
+        }
+
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Mark the current phase failed regardless of whether it was started.
+    ///
+    /// Used by reconciliation when Canopy reports a task as cancelled or
+    /// otherwise failed. Transitions `Pending` or `Active` → `Failed`,
+    /// setting `started_at` when the phase was previously `Pending`.
+    ///
+    /// Returns an error if the phase is already in a terminal state.
+    pub fn reconcile_fail_current_phase(
+        &mut self,
+        reason: impl Into<String>,
+    ) -> WorkflowEngineResult<()> {
+        let reason = reason.into();
+        let phase = self
+            .current_phase_mut()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
+
+        match phase.status {
+            PhaseStatus::Pending => {
+                phase.mark_active();
+                phase.failure_reason = Some(reason);
+                phase.mark_failed();
+            }
+            PhaseStatus::Active => {
+                phase.failure_reason = Some(reason);
+                phase.mark_failed();
+            }
+            PhaseStatus::Failed => {
+                // Already failed — idempotent, nothing to do.
+            }
+            PhaseStatus::Completed | PhaseStatus::Skipped => {
+                return Err(WorkflowError::StateError(format!(
+                    "cannot reconcile-fail phase {} from terminal status {:?}",
+                    phase.phase_id, phase.status
+                )));
+            }
+        }
+
+        self.status = WorkflowStatus::Failed;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
     /// Fail the current phase. Only active phases can be failed.
     ///
     /// # Outcome emission
