@@ -26,6 +26,12 @@ const DISPATCH_CONTEXT_TOKEN_BUDGET: usize = 64;
 /// Returns a `WorkflowInstance` with status `Dispatched` and canopy task IDs
 /// populated in each `PhaseState`.
 ///
+/// The `handoff_file_path` parameter must be the actual filesystem path to the
+/// handoff document (e.g. `/home/user/.handoffs/myrepo/task.md`). It is stored
+/// on the `WorkflowInstance` and surfaced by `hymenium status` so operators can
+/// locate the file. Passing only a repo name or relative path here will produce
+/// misleading status output.
+///
 /// # Panics
 ///
 /// Panics if `serde_json` fails to serialize a `TaskPacket`. This is considered
@@ -35,6 +41,7 @@ pub fn dispatch_workflow(
     handoff: &ParsedHandoff,
     template: &WorkflowTemplate,
     workflow_id: &WorkflowId,
+    handoff_file_path: &str,
     canopy: &dyn CanopyClient,
 ) -> Result<WorkflowInstance, DispatchError> {
     // Guard: template must have at least one phase.
@@ -89,13 +96,10 @@ pub fn dispatch_workflow(
             log_dispatch_error("create_task", err);
         })?;
 
-    // Build the workflow instance.
-    let handoff_path = handoff
-        .metadata
-        .as_ref()
-        .map(|m| m.owning_repo.clone())
-        .unwrap_or_default();
-    let mut instance = WorkflowInstance::new(workflow_id.clone(), template.clone(), &handoff_path);
+    // Build the workflow instance using the actual filesystem path so operators
+    // can locate the handoff document from `hymenium status` output.
+    let mut instance =
+        WorkflowInstance::new(workflow_id.clone(), template.clone(), handoff_file_path);
 
     // Derive constraints and acceptance criteria from the handoff for packets.
     let constraints = build_constraints(handoff);
@@ -150,6 +154,8 @@ pub fn dispatch_workflow(
             verification_required: !phase.exit_gate.requires.is_empty(),
             required_capabilities: repo_required_capabilities.clone(),
             requested_by: Some("hymenium".to_string()),
+            workflow_id: Some(workflow_id.0.clone()),
+            phase_id: Some(phase.phase_id.clone()),
         };
 
         let subtask_id = canopy
@@ -426,9 +432,14 @@ mod tests {
         let template = impl_audit_default();
         let handoff = test_handoff();
 
-        let instance =
-            dispatch_workflow(&handoff, &template, &WorkflowId("wf-1".to_string()), &mock)
-                .expect("dispatch should succeed");
+        let instance = dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("wf-1".to_string()),
+            "/handoffs/test.md",
+            &mock,
+        )
+        .expect("dispatch should succeed");
 
         // 1 parent + 2 phase subtasks = 3 tasks total.
         assert_eq!(mock.task_count(), 3);
@@ -444,9 +455,14 @@ mod tests {
         let template = impl_audit_default();
         let handoff = test_handoff();
 
-        let instance =
-            dispatch_workflow(&handoff, &template, &WorkflowId("wf-2".to_string()), &mock)
-                .expect("dispatch should succeed");
+        let instance = dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("wf-2".to_string()),
+            "/handoffs/test.md",
+            &mock,
+        )
+        .expect("dispatch should succeed");
 
         // First phase should have an assigned agent using reset role name.
         let agent = instance.phase_states[0]
@@ -465,9 +481,14 @@ mod tests {
         let template = impl_audit_default();
         let handoff = test_handoff();
 
-        let instance =
-            dispatch_workflow(&handoff, &template, &WorkflowId("wf-3".to_string()), &mock)
-                .expect("dispatch should succeed");
+        let instance = dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("wf-3".to_string()),
+            "/handoffs/test.md",
+            &mock,
+        )
+        .expect("dispatch should succeed");
 
         assert_eq!(
             instance.status,
@@ -522,9 +543,14 @@ mod tests {
         let template = impl_audit_default();
         let handoff = test_handoff();
 
-        let instance =
-            dispatch_workflow(&handoff, &template, &WorkflowId("e2e-1".to_string()), &mock)
-                .expect("dispatch should succeed");
+        let instance = dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("e2e-1".to_string()),
+            "/handoffs/test.md",
+            &mock,
+        )
+        .expect("dispatch should succeed");
 
         // Correct number of phases.
         assert_eq!(instance.phase_states.len(), 2);
@@ -573,6 +599,7 @@ mod tests {
             &handoff,
             &template,
             &WorkflowId("wf-empty".to_string()),
+            "/handoffs/test.md",
             &mock,
         );
         assert!(result.is_err());
@@ -590,6 +617,7 @@ mod tests {
             &handoff,
             &template,
             &WorkflowId("wf-slug".to_string()),
+            "/handoffs/test.md",
             &mock,
         );
         assert!(result.is_err());
@@ -627,6 +655,7 @@ mod tests {
             &handoff,
             &template,
             &WorkflowId("wf-basename".to_string()),
+            "/handoffs/test.md",
             &mock,
         )
         .expect("dispatch should succeed");
@@ -666,6 +695,7 @@ mod tests {
             &handoff,
             &template,
             &WorkflowId("wf-compress".to_string()),
+            "/handoffs/test.md",
             &mock,
         )
         .expect("dispatch should succeed");
@@ -701,6 +731,7 @@ mod tests {
             &handoff,
             &template,
             &WorkflowId("wf-caps-1".to_string()),
+            "/handoffs/test.md",
             &mock,
         )
         .expect("dispatch should succeed");
@@ -736,6 +767,7 @@ mod tests {
             &handoff,
             &template,
             &WorkflowId("wf-caps-2".to_string()),
+            "/handoffs/test.md",
             &mock,
         )
         .expect("dispatch should succeed with empty capabilities");
@@ -770,6 +802,7 @@ mod tests {
             &handoff,
             &template,
             &WorkflowId("wf-caps-3".to_string()),
+            "/handoffs/test.md",
             &mock,
         )
         .expect("dispatch should succeed");
@@ -781,6 +814,164 @@ mod tests {
             parent.required_capabilities.contains(&"schema".to_string()),
             "expected schema capability for septa repo, got: {:?}",
             parent.required_capabilities
+        );
+    }
+
+    // -- runtime identity tests -----------------------------------------------
+
+    /// Regression: `handoff_path` on the instance must reflect the actual file
+    /// path passed to `dispatch_workflow`, not the `owning_repo` metadata field.
+    #[test]
+    fn dispatch_runtime_identity_records_actual_handoff_path() {
+        let mock = MockCanopyClient::new();
+        let template = impl_audit_default();
+        let mut handoff = test_handoff();
+        // owning_repo is a repo name — this should NOT appear as the handoff_path.
+        handoff.metadata = Some(crate::parser::HandoffMetadata {
+            dispatchability: crate::parser::Dispatchability::Direct,
+            owning_repo: "ccoCentralCommand".to_string(),
+            allowed_write_scope: vec![],
+            cross_repo_rule: None,
+            non_goals: Vec::new(),
+            verification_contract: String::new(),
+            completion_update: String::new(),
+        });
+
+        let actual_path = "/home/user/.handoffs/ccoCentralCommand/task.md";
+        let instance = dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("wf-path-1".to_string()),
+            actual_path,
+            &mock,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(
+            instance.handoff_path, actual_path,
+            "handoff_path must be the filesystem path, not the owning_repo name"
+        );
+        assert_ne!(
+            instance.handoff_path, "ccoCentralCommand",
+            "handoff_path must not be the owning_repo value"
+        );
+    }
+
+    /// The phase subtask `TaskOptions` must carry the workflow and phase identity
+    /// so Canopy can associate the created task with the right workflow row.
+    #[test]
+    fn dispatch_runtime_identity_phase_options_carry_workflow_and_phase_id() {
+        use crate::dispatch::TaskOptions;
+        use std::cell::RefCell;
+
+        // Use a capturing mock that records the TaskOptions passed per subtask.
+        struct CapturingMock {
+            inner: MockCanopyClient,
+            subtask_options: RefCell<Vec<TaskOptions>>,
+        }
+
+        impl CapturingMock {
+            fn new() -> Self {
+                Self {
+                    inner: MockCanopyClient::new(),
+                    subtask_options: RefCell::new(Vec::new()),
+                }
+            }
+        }
+
+        use crate::dispatch::{
+            CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail,
+        };
+
+        impl CanopyClient for CapturingMock {
+            fn create_task(
+                &self,
+                title: &str,
+                description: &str,
+                project_root: &str,
+                options: &TaskOptions,
+            ) -> Result<String, DispatchError> {
+                self.inner.create_task(title, description, project_root, options)
+            }
+
+            fn create_subtask(
+                &self,
+                parent_id: &str,
+                title: &str,
+                description: &str,
+                options: &TaskOptions,
+            ) -> Result<String, DispatchError> {
+                self.subtask_options.borrow_mut().push(options.clone());
+                self.inner.create_subtask(parent_id, title, description, options)
+            }
+
+            fn assign_task(
+                &self,
+                task_id: &str,
+                agent_id: &str,
+                assigned_by: &str,
+            ) -> Result<(), DispatchError> {
+                self.inner.assign_task(task_id, agent_id, assigned_by)
+            }
+
+            fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
+                self.inner.get_task(task_id)
+            }
+
+            fn check_completeness(
+                &self,
+                handoff_path: &str,
+            ) -> Result<CompletenessReport, DispatchError> {
+                self.inner.check_completeness(handoff_path)
+            }
+
+            fn import_handoff(
+                &self,
+                path: &str,
+                assign_to: Option<&str>,
+            ) -> Result<ImportResult, DispatchError> {
+                self.inner.import_handoff(path, assign_to)
+            }
+        }
+
+        let capturing = CapturingMock::new();
+        let template = impl_audit_default();
+        let handoff = test_handoff();
+
+        dispatch_workflow(
+            &handoff,
+            &template,
+            &WorkflowId("wf-id-check".to_string()),
+            "/handoffs/test.md",
+            &capturing,
+        )
+        .expect("dispatch should succeed");
+
+        let opts = capturing.subtask_options.borrow();
+        assert_eq!(opts.len(), 2, "impl-audit has 2 phases");
+
+        // First phase (implement)
+        assert_eq!(
+            opts[0].workflow_id.as_deref(),
+            Some("wf-id-check"),
+            "first subtask must carry workflow_id"
+        );
+        assert_eq!(
+            opts[0].phase_id.as_deref(),
+            Some("implement"),
+            "first subtask must carry phase_id = implement"
+        );
+
+        // Second phase (audit)
+        assert_eq!(
+            opts[1].workflow_id.as_deref(),
+            Some("wf-id-check"),
+            "second subtask must carry workflow_id"
+        );
+        assert_eq!(
+            opts[1].phase_id.as_deref(),
+            Some("audit"),
+            "second subtask must carry phase_id = audit"
         );
     }
 }

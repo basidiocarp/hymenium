@@ -96,6 +96,14 @@ impl CliCanopyClient {
             args.push("--required-capabilities".to_string());
             args.push(options.required_capabilities.join(","));
         }
+        if let Some(ref wid) = options.workflow_id {
+            args.push("--workflow-id".to_string());
+            args.push(wid.clone());
+        }
+        if let Some(ref pid) = options.phase_id {
+            args.push("--phase-id".to_string());
+            args.push(pid.clone());
+        }
         args
     }
 
@@ -134,6 +142,14 @@ impl CliCanopyClient {
         if !options.required_capabilities.is_empty() {
             args.push("--required-capabilities".to_string());
             args.push(options.required_capabilities.join(","));
+        }
+        if let Some(ref wid) = options.workflow_id {
+            args.push("--workflow-id".to_string());
+            args.push(wid.clone());
+        }
+        if let Some(ref pid) = options.phase_id {
+            args.push("--phase-id".to_string());
+            args.push(pid.clone());
         }
         args
     }
@@ -475,6 +491,98 @@ mod tests {
         assert!(
             !args.iter().any(|a| a.contains("tier")),
             "tier-related flags must not appear in create subtask args"
+        );
+    }
+
+    // -- runtime identity: workflow_id / phase_id passing ----------------------
+
+    #[test]
+    fn build_create_subtask_args_includes_workflow_id_and_phase_id() {
+        let options = TaskOptions {
+            workflow_id: Some("wf-abc123".to_string()),
+            phase_id: Some("implement".to_string()),
+            ..Default::default()
+        };
+        let args = CliCanopyClient::build_create_subtask_args("parent-1", "t", "d", &options);
+
+        let wid_pos = args
+            .iter()
+            .position(|a| a == "--workflow-id")
+            .expect("--workflow-id should be present");
+        assert_eq!(
+            args.get(wid_pos + 1).map(String::as_str),
+            Some("wf-abc123"),
+            "--workflow-id value should follow the flag"
+        );
+
+        let pid_pos = args
+            .iter()
+            .position(|a| a == "--phase-id")
+            .expect("--phase-id should be present");
+        assert_eq!(
+            args.get(pid_pos + 1).map(String::as_str),
+            Some("implement"),
+            "--phase-id value should follow the flag"
+        );
+    }
+
+    #[test]
+    fn build_create_subtask_args_omits_workflow_id_and_phase_id_when_none() {
+        let options = TaskOptions::default();
+        let args = CliCanopyClient::build_create_subtask_args("parent-1", "t", "d", &options);
+
+        assert!(
+            !args.iter().any(|a| a == "--workflow-id"),
+            "--workflow-id must not appear when not set"
+        );
+        assert!(
+            !args.iter().any(|a| a == "--phase-id"),
+            "--phase-id must not appear when not set"
+        );
+    }
+
+    #[test]
+    fn build_create_task_args_omits_workflow_id_and_phase_id_when_none() {
+        let options = TaskOptions::default();
+        let args = CliCanopyClient::build_create_task_args("t", "d", ".", &options);
+
+        assert!(
+            !args.iter().any(|a| a == "--workflow-id"),
+            "--workflow-id must not appear when not set"
+        );
+        assert!(
+            !args.iter().any(|a| a == "--phase-id"),
+            "--phase-id must not appear when not set"
+        );
+    }
+
+    #[test]
+    fn build_create_task_args_includes_workflow_id_and_phase_id() {
+        let options = TaskOptions {
+            workflow_id: Some("wf-xyz789".to_string()),
+            phase_id: Some("audit".to_string()),
+            ..Default::default()
+        };
+        let args = CliCanopyClient::build_create_task_args("t", "d", ".", &options);
+
+        let wid_pos = args
+            .iter()
+            .position(|a| a == "--workflow-id")
+            .expect("--workflow-id should be present");
+        assert_eq!(
+            args.get(wid_pos + 1).map(String::as_str),
+            Some("wf-xyz789"),
+            "--workflow-id value should follow the flag"
+        );
+
+        let pid_pos = args
+            .iter()
+            .position(|a| a == "--phase-id")
+            .expect("--phase-id should be present");
+        assert_eq!(
+            args.get(pid_pos + 1).map(String::as_str),
+            Some("audit"),
+            "--phase-id value should follow the flag"
         );
     }
 }

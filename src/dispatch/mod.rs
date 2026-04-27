@@ -80,6 +80,14 @@ pub struct TaskOptions {
     ///
     /// Used by canopy to track task provenance. If None, omitted from the create command.
     pub requested_by: Option<String>,
+    /// Workflow ID to associate this task with in Canopy.
+    ///
+    /// Passed as `--workflow-id` to `canopy task create`. If None, omitted.
+    pub workflow_id: Option<String>,
+    /// Phase ID within the workflow for this task.
+    ///
+    /// Passed as `--phase-id` to `canopy task create`. If None, omitted.
+    pub phase_id: Option<String>,
 }
 
 /// Detail record for a canopy task.

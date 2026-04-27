@@ -86,9 +86,10 @@ fn print_human(inst: &WorkflowInstance) {
     println!("  Phases:");
     for state in &inst.phase_states {
         let agent = state.agent_id.as_deref().unwrap_or("-");
+        let task_id = state.canopy_task_id.as_deref().unwrap_or("-");
         println!(
-            "    {} ({}) — {} | agent: {}",
-            state.phase_id, state.role, state.status, agent
+            "    {} ({}) — {} | agent: {} | canopy: {}",
+            state.phase_id, state.role, state.status, agent, task_id
         );
     }
 }

@@ -57,8 +57,17 @@ pub fn run(path: &Path, store: &WorkflowStore) -> Result<WorkflowInstance, Dispa
 
     let workflow_id = WorkflowId(Ulid::new().to_string());
 
+    // Canonicalize the path so `hymenium status` always shows an absolute,
+    // resolvable path regardless of how the caller invoked the command.
+    let handoff_file_path = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .into_owned();
+
     let canopy = CliCanopyClient::new("canopy");
-    let instance = dispatch_workflow(&handoff, &template, &workflow_id, &canopy)?;
+    let instance =
+        dispatch_workflow(&handoff, &template, &workflow_id, &handoff_file_path, &canopy)?;
 
     // Insert the workflow row first so the FK on workflow_transitions is satisfied.
     store.insert_workflow(&instance)?;
@@ -130,7 +139,7 @@ mod tests {
         let handoff = minimal_handoff();
         let workflow_id = WorkflowId("01TEST000000000000000FK001".to_string());
 
-        let instance = dispatch_workflow(&handoff, &template, &workflow_id, &mock)
+        let instance = dispatch_workflow(&handoff, &template, &workflow_id, "/handoffs/test.md", &mock)
             .expect("dispatch_workflow should succeed");
 
         // This is the exact write sequence from commands/dispatch.rs `run()`.
