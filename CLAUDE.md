@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Hymenium is a workflow orchestration engine for multi-agent task execution. It is a single Rust binary with a CLI and an MCP server that reads handoff documents, runs workflow templates, and dispatches agents through Canopy. Hymenium owns the workflow lifecycle — phase gating, dispatch decisions, handoff decomposition, progress monitoring, and retry/recovery — while deferring coordination state to Canopy, lifecycle signals to Cortina, long-term memory to Hyphae, and agent sessions to Volva.
+Hymenium is a workflow orchestration engine for multi-agent task execution. It is a single Rust binary with a CLI that reads handoff documents, runs workflow templates, and dispatches agents through Canopy. Hymenium owns the workflow lifecycle — phase gating, dispatch decisions, handoff decomposition, progress monitoring, and retry/recovery — while deferring coordination state to Canopy, lifecycle signals to Cortina, long-term memory to Hyphae, and agent sessions to Volva.
 
 ---
 
@@ -61,7 +61,7 @@ cargo fmt
 
 ```text
 src/
-├── main.rs              # CLI entry point and MCP server
+├── main.rs              # CLI entry point
 ├── parser/              # Handoff document parser
 │   ├── markdown.rs      # Parse structured handoff markdown
 │   └── metadata.rs      # Extract handoff metadata block
@@ -105,7 +105,7 @@ pub trait WorkflowEngine {
 }
 ```
 
-`WorkflowEngine` is the central interface. `engine.rs` implements it by delegating to `gate.rs` for preconditions, `dispatch.rs` for agent creation, and `monitor.rs` for completeness checks. Tests stub this trait to exercise gate and retry logic without live Canopy connectivity.
+`WorkflowEngine` is the central interface. `engine.rs` implements it by delegating to `gate.rs` for preconditions, `dispatch/` for agent creation, and `monitor/` for completeness checks. Tests stub this trait to exercise gate and retry logic without live Canopy connectivity.
 
 ---
 
@@ -113,9 +113,9 @@ pub trait WorkflowEngine {
 
 - **Separate binary from Canopy** — orchestration and the coordination ledger have different failure modes; tying them together would make Canopy unavailability block all workflow state reads.
 - **SQLite for workflow state** — local durability, same pattern as the rest of the ecosystem; Hymenium's database holds workflow lifecycle records that are distinct from Canopy's task ledger.
-- **MCP and CLI dual surface** — same pattern as Canopy; orchestrators can drive Hymenium programmatically or from shell scripts without picking a protocol.
+- **CLI surface** — orchestrators and operators drive Hymenium from shell scripts; the CLI is the only entry point.
 - **Reads Canopy via MCP/CLI, never via direct database access** — keeps the contract boundary clean and lets Canopy's schema evolve without breaking Hymenium's internals.
-- **Workflow templates are data, not code** — templates in `templates/` are declarative patterns that the engine interprets; adding a new workflow pattern does not require changing engine logic.
+- **Workflow templates are data, not code** — templates defined in `src/workflow/template.rs` are declarative patterns that the engine interprets; adding a new workflow pattern does not require changing engine logic.
 - **Phase gates are non-negotiable** — the auditor phase cannot start until the implementer phase satisfies all gate conditions; this is enforced in `gate.rs`, not left to caller discipline.
 
 ---
@@ -126,8 +126,8 @@ pub trait WorkflowEngine {
 |------|---------|
 | `src/workflow/engine.rs` | Central state machine; owns phase transitions and gate evaluation |
 | `src/workflow/gate.rs` | Phase gating rules; the single enforcement point for transition preconditions |
-| `src/dispatch.rs` | Canopy task creation and agent assignment; the only outbound write surface |
-| `src/monitor.rs` | Completeness polling, escalation thresholds, and stall detection |
+| `src/dispatch/mod.rs` | Canopy task creation and agent assignment; the only outbound write surface |
+| `src/monitor/mod.rs` | Completeness polling, escalation thresholds, and stall detection |
 | `src/retry.rs` | Stalled agent close-and-relaunch logic |
 | `src/parser/markdown.rs` | Handoff document intake; maps raw markdown to `ParsedHandoff` |
 | `src/store.rs` | SQLite schema, migrations, and workflow state persistence |
@@ -144,8 +144,8 @@ pub trait WorkflowEngine {
 | `dispatch-request-v1` | Canopy | MCP tool `canopy_task_create` and `canopy_task_assign` | `septa/dispatch-request-v1.schema.json` |
 
 **Source files:**
-- `src/dispatch.rs` — `dispatch_handoff()` — builds and sends `dispatch-request-v1` to Canopy via MCP
-- `src/monitor.rs` — `emit_status()` — builds and sends `workflow-status-v1` for operator visibility
+- `src/dispatch/mod.rs` — `dispatch_handoff()` — builds and sends `dispatch-request-v1` to Canopy via MCP
+- `src/monitor/mod.rs` — `emit_status()` — builds and sends `workflow-status-v1` for operator visibility
 
 Breaking change impact: if `dispatch-request-v1` shape changes, Canopy will reject task creation calls and workflows will stall at dispatch. If `workflow-status-v1` changes, Cap will misrender operator views.
 
@@ -157,7 +157,7 @@ Breaking change impact: if `dispatch-request-v1` shape changes, Canopy will reje
 | Handoff documents | `.handoffs/` directory | File read | Structured markdown (see `src/parser/`) |
 
 **Receiver source files:**
-- `src/monitor.rs` — `poll_canopy()` — reads `canopy-task-detail-v1` to evaluate completeness gates
+- `src/monitor/mod.rs` — `poll_canopy()` — reads `canopy-task-detail-v1` to evaluate completeness gates
 - `src/parser/markdown.rs` — `parse_handoff()` — reads raw handoff markdown and returns `ParsedHandoff`
 
 ### Shared Dependencies
@@ -185,5 +185,4 @@ Config file: `~/.config/hymenium/config.toml` (override with `HYMENIUM_CONFIG` e
 
 - Unit tests cover parser correctness, decomposer split logic, gate precondition evaluation, and retry decision trees — all without live Canopy.
 - Integration tests (marked `#[ignore]`) exercise the full Canopy round-trip: dispatch, poll, status update, and close-out. Run with `cargo test --ignored` against a running Canopy instance.
-- Workflow template tests verify that each template in `templates/` parses correctly and produces a valid initial state.
 - Fixtures in `tests/fixtures/` use real handoff markdown samples, not synthetic ones.

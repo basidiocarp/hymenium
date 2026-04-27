@@ -47,14 +47,23 @@ The implementer/auditor workflow is the first built-in template. Hymenium enforc
 # Build or install
 cargo install --path .
 
-# Run the implementer/auditor workflow on a handoff
-hymenium run --handoff .handoffs/my-feature.md
+# Dispatch a handoff to available agents
+hymenium dispatch .handoffs/my-feature.md
 
-# Check workflow status
+# Check workflow status (all active workflows)
 hymenium status
 
-# Serve the MCP surface for orchestrator agents
-hymenium serve
+# Check status of a specific workflow
+hymenium status <workflow-id>
+
+# Cancel a running workflow
+hymenium cancel <workflow-id>
+
+# Reconcile workflow phases against Canopy task statuses (idempotent)
+hymenium reconcile <workflow-id>
+
+# Decompose a large handoff (stub — not yet implemented)
+hymenium decompose .handoffs/my-large-feature.md
 ```
 
 ---
@@ -113,7 +122,7 @@ Handoff docs / operator         Hymenium                       Canopy + agents
 
 - **Handoff parsing** — reads structured handoff markdown and extracts scope, metadata, and verification requirements into typed values; invalid documents are rejected at intake, not discovered at dispatch time.
 - **Automatic decomposition** — splits handoffs that exceed a single agent's scope into focused child handoffs; each child gets a coherent slice of the original work.
-- **Workflow templates** — first-class declarative patterns stored in `templates/`; adding a new workflow type does not require engine changes.
+- **Workflow templates** — first-class declarative patterns interpreted by the engine; adding a new workflow type does not require engine changes.
 - **Phase gating** — enforces transition preconditions in one place (`gate.rs`); the auditor cannot start until the implementer has produced a real diff and verification results.
 - **Progress monitoring** — polls Canopy state against completeness conditions; escalates to the operator when a workflow exceeds its timeout without advancing.
 - **Retry and recovery** — detects heartbeat timeouts, closes stalled agents through Canopy, and re-enters dispatch with a narrowed scope.
@@ -124,21 +133,22 @@ Handoff docs / operator         Hymenium                       Canopy + agents
 
 ```text
 hymenium (single binary)
+├── src/commands/    CLI subcommand handlers (dispatch, status, cancel, reconcile, ...)
 ├── src/parser/      handoff intake (markdown → ParsedHandoff)
 ├── src/decompose/   split large handoffs into focused child handoffs
 ├── src/workflow/    template engine and phase gate enforcement
 ├── src/dispatch/    Canopy task creation and agent assignment
 ├── src/monitor/     progress polling and escalation
 ├── src/retry.rs     stall detection and recovery
-├── src/store.rs     SQLite workflow state persistence
-└── templates/       declarative workflow pattern definitions
+└── src/store.rs     SQLite workflow state persistence
 ```
 
 ```text
-hymenium run     --handoff <path>   parse, decompose, and start a workflow
-hymenium status  [--workflow <id>]  report workflow phase and gate conditions
-hymenium retry   --workflow <id>    close stalled agents and relaunch
-hymenium serve                      expose MCP tools for orchestrator agents
+hymenium dispatch  <path>           parse and dispatch a handoff to available agents
+hymenium status    [<workflow-id>]  report workflow phase and gate conditions (all if omitted)
+hymenium cancel    <workflow-id>    cancel a running workflow
+hymenium reconcile <workflow-id>    reconcile workflow phases against Canopy task statuses
+hymenium decompose <path>           NOT YET IMPLEMENTED — stub only
 ```
 
 ---
@@ -172,7 +182,6 @@ cargo fmt
 
 - Unit tests cover parser, decomposer, gate logic, and retry decisions without live Canopy.
 - Integration tests (marked `#[ignore]`) exercise the full Canopy round-trip. Run with `cargo test --ignored` against a running Canopy instance.
-- Workflow template tests verify that each template in `templates/` parses and produces a valid initial state.
 
 ## License
 

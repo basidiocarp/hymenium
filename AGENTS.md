@@ -9,11 +9,8 @@ Hymenium automates the implementer/auditor workflow that is currently instructio
 ## Source of Truth
 
 - `src/` — all workflow logic; this is the authoritative implementation.
-- `templates/` — authoritative workflow pattern definitions; these are the data the engine interprets. Do not hard-code workflow shapes in `engine.rs`.
 - `../septa/` — authoritative cross-tool payload shapes; update contract schemas there before changing implementing code.
 - `../ecosystem-versions.toml` — shared dependency pins; check before upgrading `spore`, `rusqlite`, or other shared crates.
-
-When `src/` and `templates/` drift, templates win — the engine should interpret whatever the template says, not enforce its own view of the pattern.
 
 ---
 
@@ -24,7 +21,7 @@ Before writing code, verify:
 1. **Contracts**: read `../septa/README.md` — find which contracts Hymenium produces (`workflow-status-v1`, `dispatch-request-v1`) and which it consumes (`canopy-task-detail-v1`). Update contract schemas before changing implementing code.
 2. **Versions**: read `../ecosystem-versions.toml` — verify `spore` and `rusqlite` pins before upgrading any shared dependency.
 3. **Design note**: read `../docs/architecture/hymenium-design-note.md` before making structural changes to the engine or gate layer.
-4. **Canopy boundary**: confirm that any new outbound write goes through `src/dispatch.rs` and not via a direct database call or ad hoc shell-out.
+4. **Canopy boundary**: confirm that any new outbound write goes through `src/dispatch/` and not via a direct database call or ad hoc shell-out.
 
 ---
 
@@ -56,10 +53,10 @@ Hymenium is a linear pipeline: parser feeds decomposer, decomposer feeds workflo
 Key boundaries:
 
 - `src/parser/` — owns intake only; produces `ParsedHandoff`, nothing else. Does not make dispatch decisions.
-- `src/workflow/gate.rs` — the single enforcement point for phase transition preconditions. Phase gates must be checked here, never inlined into `engine.rs` or `dispatch.rs`.
-- `src/dispatch.rs` — the only module that writes to Canopy. All outbound task creation and agent assignment flows through here.
-- `src/monitor.rs` — reads Canopy state; does not write to it. Escalation decisions go to `retry.rs`.
-- `templates/` — data, not code. Adding a new workflow pattern should not require engine changes.
+- `src/workflow/gate.rs` — the single enforcement point for phase transition preconditions. Phase gates must be checked here, never inlined into `engine.rs` or `dispatch/`.
+- `src/dispatch/mod.rs` — the only module that writes to Canopy. All outbound task creation and agent assignment flows through here.
+- `src/monitor/mod.rs` — reads Canopy state; does not write to it. Escalation decisions go to `retry.rs`.
+- `src/workflow/template.rs` — workflow pattern definitions; adding a new workflow pattern should not require engine changes.
 
 Current direction:
 
@@ -73,7 +70,7 @@ Current direction:
 
 - Never access Canopy's database directly. Use MCP tools or the Canopy CLI. The database path is Canopy's internal concern.
 - Always communicate with Canopy via MCP or CLI. If a needed operation is missing from Canopy's surface, add it to Canopy first.
-- Workflow templates are data, not code. New patterns go in `templates/`, not in `engine.rs` branches.
+- Workflow templates are data, not code. New patterns go in `src/workflow/template.rs`, not in `engine.rs` branches.
 - Phase gates are non-negotiable. Do not add escape hatches or `--force` flags that skip gate evaluation.
 - When changing a cross-tool payload, update the `../septa/` schema and fixture before touching implementing code, then validate: `cd ../septa && bash validate-all.sh`.
 - Run `cargo clippy` and `cargo fmt --check` before closing any implementation task.
@@ -86,16 +83,16 @@ For substantial Hymenium work, default to two agents:
 
 **1. Primary implementation worker**
 - Owns write scope for the engine, parser, gate, or dispatch layer
-- Specific files in scope: `src/workflow/`, `src/parser/`, `src/dispatch.rs`, `src/store.rs`
+- Specific files in scope: `src/workflow/`, `src/parser/`, `src/dispatch/`, `src/store.rs`
 - Does not cross into: Canopy source, Septa schemas (read only; update via a septa-scoped change), or other ecosystem repos
 
 **2. Independent validator**
 - Does not duplicate implementation — reviews the broader shape
 - Specifically looks for:
-  - Gate bypass: any path that reaches `dispatch.rs` without passing through `gate.rs`
+  - Gate bypass: any path that reaches `dispatch/` without passing through `gate.rs`
   - Canopy boundary violations: direct SQLite access or ad hoc shell-outs that bypass MCP
   - Contract drift: `dispatch-request-v1` or `workflow-status-v1` payloads that do not match `../septa/` schemas
-  - Template coupling: workflow-specific logic that leaked into `engine.rs` rather than living in templates
+  - Template coupling: workflow-specific logic that leaked into `engine.rs` rather than living in `template.rs`
   - Missing recovery paths: stall detection or retry logic that silently swallows errors
 
 Add a docs worker when `README.md`, `CLAUDE.md`, `AGENTS.md`, or `docs/` content changed materially.
@@ -127,7 +124,7 @@ Read before making changes to workflow templates or design docs:
 |-----|--------------|
 | `../docs/architecture/hymenium-design-note.md` | **Always** before structural changes to the engine or gate layer |
 | `../septa/README.md` | **Always** when changing a cross-tool payload |
-| `templates/README.md` | **Always when editing workflow templates** — template format spec |
+| `src/workflow/template.rs` | **Always when editing workflow templates** — template definitions |
 
 ---
 
@@ -138,7 +135,7 @@ A task is not complete until:
 - [ ] `cargo test` passes in `hymenium/`
 - [ ] `cargo clippy` passes with no warnings
 - [ ] `../septa/` schemas and fixtures are updated if any cross-tool payload changed, and `cd ../septa && bash validate-all.sh` passes
-- [ ] Canopy integration has been tested when `dispatch.rs` or `monitor.rs` changed (use `cargo test --ignored` against a running Canopy instance)
+- [ ] Canopy integration has been tested when `src/dispatch/` or `src/monitor/` changed (use `cargo test --ignored` against a running Canopy instance)
 - [ ] Any skipped validation or follow-up work is stated explicitly in the final response
 
 If validation was skipped, say so clearly and explain why.
@@ -150,5 +147,5 @@ If validation was skipped, say so clearly and explain why.
 Current direction — do not work against these:
 
 - Build the implementer/auditor template as the canonical first workflow; do not hard-code its shape into the engine
-- Keep all Canopy writes inside `dispatch.rs`; resist adding secondary write paths elsewhere
+- Keep all Canopy writes inside `src/dispatch/`; resist adding secondary write paths elsewhere
 - Keep gate enforcement inside `gate.rs`; do not let callers skip gate checks by calling dispatch directly
