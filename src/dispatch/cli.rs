@@ -1,6 +1,7 @@
 use super::{
     CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail, TaskOptions,
 };
+use crate::workflow::template::AgentRole;
 
 // ---------------------------------------------------------------------------
 // CliCanopyClient
@@ -37,6 +38,28 @@ impl CliCanopyClient {
 }
 
 impl CliCanopyClient {
+    fn canopy_required_role(role: &AgentRole) -> &'static str {
+        match role {
+            AgentRole::SpecAuthor
+            | AgentRole::WorkflowPlanner
+            | AgentRole::PacketCompiler
+            | AgentRole::DecompositionChecker
+            | AgentRole::WorkflowCoordinator => "orchestrator",
+            AgentRole::Worker | AgentRole::RepairWorker => "implementer",
+            AgentRole::OutputVerifier | AgentRole::FinalVerifier => "validator",
+        }
+    }
+
+    fn parse_created_task_id(output: &str) -> String {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+            if let Some(task_id) = value.get("task_id").and_then(serde_json::Value::as_str) {
+                return task_id.to_string();
+            }
+        }
+
+        output.trim().to_string()
+    }
+
     /// Build the CLI args for `task create` (top-level task).
     ///
     /// Returns owned `String`s so the caller controls lifetimes.
@@ -58,7 +81,7 @@ impl CliCanopyClient {
         ];
         if let Some(ref role) = options.required_role {
             args.push("--required-role".to_string());
-            args.push(role.to_string());
+            args.push(Self::canopy_required_role(role).to_string());
         }
         if options.verification_required {
             args.push("--verification-required".to_string());
@@ -97,7 +120,7 @@ impl CliCanopyClient {
         ];
         if let Some(ref role) = options.required_role {
             args.push("--required-role".to_string());
-            args.push(role.to_string());
+            args.push(Self::canopy_required_role(role).to_string());
         }
         if options.verification_required {
             args.push("--verification-required".to_string());
@@ -146,7 +169,8 @@ impl CanopyClient for CliCanopyClient {
     ) -> Result<String, DispatchError> {
         let owned = Self::build_create_task_args(title, description, project_root, options);
         let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-        self.run(&args)
+        let output = self.run(&args)?;
+        Ok(Self::parse_created_task_id(&output))
     }
 
     fn create_subtask(
@@ -158,7 +182,8 @@ impl CanopyClient for CliCanopyClient {
     ) -> Result<String, DispatchError> {
         let owned = Self::build_create_subtask_args(parent_id, title, description, options);
         let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-        self.run(&args)
+        let output = self.run(&args)?;
+        Ok(Self::parse_created_task_id(&output))
     }
 
     fn assign_task(
@@ -214,6 +239,60 @@ mod tests {
     fn cli_client_builds() {
         let client = CliCanopyClient::new("canopy");
         assert_eq!(client.canopy_bin, "canopy");
+    }
+
+    #[test]
+    fn parse_created_task_id_extracts_json_task_id() {
+        let output = r#"{"task_id":"01TASK","title":"debug"}"#;
+        assert_eq!(CliCanopyClient::parse_created_task_id(output), "01TASK");
+    }
+
+    #[test]
+    fn parse_created_task_id_preserves_raw_id_fallback() {
+        assert_eq!(CliCanopyClient::parse_created_task_id("01RAW\n"), "01RAW");
+    }
+
+    #[test]
+    fn canopy_required_role_maps_hymenium_roles_to_canopy_roles() {
+        // implementer variants
+        assert_eq!(
+            CliCanopyClient::canopy_required_role(&AgentRole::Worker),
+            "implementer"
+        );
+        assert_eq!(
+            CliCanopyClient::canopy_required_role(&AgentRole::RepairWorker),
+            "implementer"
+        );
+        // validator variants
+        assert_eq!(
+            CliCanopyClient::canopy_required_role(&AgentRole::OutputVerifier),
+            "validator"
+        );
+        assert_eq!(
+            CliCanopyClient::canopy_required_role(&AgentRole::FinalVerifier),
+            "validator"
+        );
+        // orchestrator variants
+        assert_eq!(
+            CliCanopyClient::canopy_required_role(&AgentRole::WorkflowCoordinator),
+            "orchestrator"
+        );
+        assert_eq!(
+            CliCanopyClient::canopy_required_role(&AgentRole::SpecAuthor),
+            "orchestrator"
+        );
+        assert_eq!(
+            CliCanopyClient::canopy_required_role(&AgentRole::WorkflowPlanner),
+            "orchestrator"
+        );
+        assert_eq!(
+            CliCanopyClient::canopy_required_role(&AgentRole::PacketCompiler),
+            "orchestrator"
+        );
+        assert_eq!(
+            CliCanopyClient::canopy_required_role(&AgentRole::DecompositionChecker),
+            "orchestrator"
+        );
     }
 
     fn caps_options(caps: Vec<String>) -> TaskOptions {
