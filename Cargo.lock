@@ -347,6 +347,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spore",
+ "tempfile",
  "thiserror",
  "toml",
  "tracing",
@@ -781,7 +782,6 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "spore"
 version = "0.4.11"
-source = "git+https://github.com/basidiocarp/spore?tag=v0.4.11#0bc2e878010e75e30e26fa517d747e97d59628b0"
 dependencies = [
  "anyhow",
  "chrono",

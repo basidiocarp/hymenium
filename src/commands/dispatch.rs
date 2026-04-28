@@ -1,6 +1,6 @@
 //! `hymenium dispatch <path>` command handler.
 
-use crate::dispatch::{dispatch_workflow, CliCanopyClient};
+use crate::dispatch::{dispatch_workflow, CapabilityCanopyClient, CliCanopyClient};
 use crate::parser::markdown::parse_handoff;
 use crate::store::{StoreError, WorkflowStore};
 use crate::workflow::engine::WorkflowInstance;
@@ -65,9 +65,14 @@ pub fn run(path: &Path, store: &WorkflowStore) -> Result<WorkflowInstance, Dispa
         .to_string_lossy()
         .into_owned();
 
-    let canopy = CliCanopyClient::new("canopy");
-    let instance =
-        dispatch_workflow(&handoff, &template, &workflow_id, &handoff_file_path, &canopy)?;
+    let canopy = CapabilityCanopyClient::new(CliCanopyClient::new("canopy"));
+    let instance = dispatch_workflow(
+        &handoff,
+        &template,
+        &workflow_id,
+        &handoff_file_path,
+        &canopy,
+    )?;
 
     // Insert the workflow row first so the FK on workflow_transitions is satisfied.
     store.insert_workflow(&instance)?;
@@ -139,8 +144,14 @@ mod tests {
         let handoff = minimal_handoff();
         let workflow_id = WorkflowId("01TEST000000000000000FK001".to_string());
 
-        let instance = dispatch_workflow(&handoff, &template, &workflow_id, "/handoffs/test.md", &mock)
-            .expect("dispatch_workflow should succeed");
+        let instance = dispatch_workflow(
+            &handoff,
+            &template,
+            &workflow_id,
+            "/handoffs/test.md",
+            &mock,
+        )
+        .expect("dispatch_workflow should succeed");
 
         // This is the exact write sequence from commands/dispatch.rs `run()`.
         // A reversed order (record_transition first) would fail with a FK error.

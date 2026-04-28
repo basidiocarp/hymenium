@@ -12,6 +12,7 @@
 //! calls using the Canopy CLI adapter in `cli.rs`.
 
 pub mod capability;
+pub mod capability_client;
 mod cli;
 mod mock;
 mod orchestrate;
@@ -19,6 +20,7 @@ pub mod task_packet;
 
 // Re-export everything that was public in the original dispatch.rs so external
 // callers see no change.
+pub use capability_client::CapabilityCanopyClient;
 pub use cli::CliCanopyClient;
 pub use mock::MockCanopyClient;
 pub use orchestrate::{agent_name, dispatch_workflow, handoff_slug};
@@ -191,19 +193,11 @@ pub enum PhaseReconcileOutcome {
     /// Canopy task is still active; phase left unchanged.
     StillActive,
     /// Canopy task was completed; phase is now Completed and workflow may have advanced.
-    MarkedCompleted {
-        phase_id: String,
-        advanced: bool,
-    },
+    MarkedCompleted { phase_id: String, advanced: bool },
     /// Canopy task was cancelled or failed; phase is now Failed.
-    MarkedFailed {
-        phase_id: String,
-        reason: String,
-    },
+    MarkedFailed { phase_id: String, reason: String },
     /// Phase was already in a terminal state; reconciliation was idempotent.
-    AlreadyTerminal {
-        phase_id: String,
-    },
+    AlreadyTerminal { phase_id: String },
 }
 
 /// Result of reconciling all phases in a workflow against Canopy.
@@ -340,14 +334,9 @@ pub fn reconcile_phases(
             instance
                 .reconcile_fail_current_phase(reason.clone())
                 .map_err(|e| {
-                    DispatchError::InvalidState(format!(
-                        "reconcile fail for phase {phase_id}: {e}"
-                    ))
+                    DispatchError::InvalidState(format!("reconcile fail for phase {phase_id}: {e}"))
                 })?;
-            outcomes.push(PhaseReconcileOutcome::MarkedFailed {
-                phase_id,
-                reason,
-            });
+            outcomes.push(PhaseReconcileOutcome::MarkedFailed { phase_id, reason });
         } else {
             // Task is still active (pending, in_progress, assigned, etc.).
             outcomes.push(PhaseReconcileOutcome::StillActive);
@@ -356,4 +345,3 @@ pub fn reconcile_phases(
 
     Ok(ReconcileResult { instance, outcomes })
 }
-
