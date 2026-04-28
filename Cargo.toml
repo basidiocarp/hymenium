@@ -1,6 +1,6 @@
 [package]
 name = "hymenium"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["William Newton"]
@@ -17,9 +17,7 @@ clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# TODO: switch back to git pin once a3c7f5b is pushed to GitHub:
-# spore = { git = "https://github.com/basidiocarp/spore", rev = "a3c7f5bf8f4025b7a507f44d68a338244ad2d6e4" }
-spore = { path = "../spore" }
+spore = { git = "https://github.com/basidiocarp/spore", rev = "a3c7f5bf8f4025b7a507f44d68a338244ad2d6e4" }
 thiserror = "2"
 rusqlite = { version = "0.39", features = ["bundled"] }
 tracing = "0.1"

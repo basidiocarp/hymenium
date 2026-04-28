@@ -338,7 +338,7 @@ checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
 name = "hymenium"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -782,6 +782,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "spore"
 version = "0.4.11"
+source = "git+https://github.com/basidiocarp/spore?rev=a3c7f5bf8f4025b7a507f44d68a338244ad2d6e4#a3c7f5bf8f4025b7a507f44d68a338244ad2d6e4"
 dependencies = [
  "anyhow",
  "chrono",
