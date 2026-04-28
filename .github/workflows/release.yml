@@ -63,6 +63,17 @@ jobs:
           fi
         shell: bash
 
+      - name: Smoke test
+        if: matrix.cross != 'true'
+        run: |
+          set -euo pipefail
+          BINARY=target/${{ matrix.target }}/release/hymenium
+          echo "--- L0: version ---"
+          "$BINARY" --version
+          echo "--- L1: help ---"
+          "$BINARY" --help
+        shell: bash
+
       - name: Package (unix)
         if: matrix.archive == 'tar.gz'
         run: |
