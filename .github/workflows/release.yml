@@ -50,7 +50,7 @@ jobs:
 
       - name: Install cross (aarch64-linux)
         if: matrix.cross
-        uses: taiki-e/install-action@v2.69.7
+        uses: taiki-e/install-action@v2.75.25
         with:
           tool: cross
 
