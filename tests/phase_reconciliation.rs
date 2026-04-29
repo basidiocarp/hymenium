@@ -5,8 +5,8 @@
 //! idempotent and handles all terminal Canopy statuses.
 
 use hymenium::dispatch::{
-    CanopyClient, CompletenessReport, DispatchError, ImportResult, PhaseReconcileOutcome,
-    TaskDetail, TaskOptions, reconcile_phases,
+    reconcile_phases, CanopyClient, CompletenessReport, DispatchError, ImportResult,
+    PhaseReconcileOutcome, TaskDetail, TaskOptions,
 };
 use hymenium::workflow::engine::{PhaseStatus, WorkflowInstance, WorkflowStatus};
 use hymenium::workflow::template::impl_audit_default;
@@ -59,12 +59,7 @@ impl CanopyClient for StatusMock {
         unimplemented!("not needed for reconcile tests")
     }
 
-    fn assign_task(
-        &self,
-        _task_id: &str,
-        _agent: &str,
-        _by: &str,
-    ) -> Result<(), DispatchError> {
+    fn assign_task(&self, _task_id: &str, _agent: &str, _by: &str) -> Result<(), DispatchError> {
         unimplemented!("not needed for reconcile tests")
     }
 
@@ -86,10 +81,7 @@ impl CanopyClient for StatusMock {
         })
     }
 
-    fn check_completeness(
-        &self,
-        _path: &str,
-    ) -> Result<CompletenessReport, DispatchError> {
+    fn check_completeness(&self, _path: &str) -> Result<CompletenessReport, DispatchError> {
         Ok(CompletenessReport {
             complete: true,
             total_items: 0,
@@ -113,11 +105,8 @@ impl CanopyClient for StatusMock {
 /// - Status is `Dispatched`
 fn dispatched_instance(id: &str) -> WorkflowInstance {
     let template = impl_audit_default();
-    let mut instance = WorkflowInstance::new(
-        WorkflowId(id.to_string()),
-        template,
-        "/handoffs/test.md",
-    );
+    let mut instance =
+        WorkflowInstance::new(WorkflowId(id.to_string()), template, "/handoffs/test.md");
     instance.phase_states[0].canopy_task_id = Some("task-implement".to_string());
     instance.phase_states[1].canopy_task_id = Some("task-audit".to_string());
     instance.status = WorkflowStatus::Dispatched;
@@ -416,7 +405,10 @@ fn phase_reconciliation_already_completed_phase_is_idempotent() {
     let result = reconcile_phases(instance, &canopy).expect("reconcile");
 
     // Implement phase must remain Completed.
-    assert_eq!(result.instance.phase_states[0].status, PhaseStatus::Completed);
+    assert_eq!(
+        result.instance.phase_states[0].status,
+        PhaseStatus::Completed
+    );
     // Audit phase still active.
     assert_eq!(result.instance.phase_states[1].status, PhaseStatus::Pending);
     assert_eq!(result.instance.current_phase_idx, 1);

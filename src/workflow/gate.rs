@@ -260,10 +260,9 @@ impl GateEvaluator for EvidenceGateEvaluator {
             ),
             // For conditions not yet backed by evidence fields, default to
             // conservative pass to avoid blocking non-evidence gates.
-            GateCondition::AuditClean | GateCondition::FindingsResolved => (
-                true,
-                "structural gate — not evidence-backed".to_string(),
-            ),
+            GateCondition::AuditClean | GateCondition::FindingsResolved => {
+                (true, "structural gate — not evidence-backed".to_string())
+            }
             GateCondition::Custom(name) => (
                 false,
                 format!("unknown custom condition '{name}' — defaulting to blocked"),

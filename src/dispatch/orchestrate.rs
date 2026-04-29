@@ -120,7 +120,10 @@ pub fn dispatch_workflow(
     //
     // TODO(#118f-rollback): add CanopyClient::cancel_task and compensate on failure.
     for (phase, state) in template.phases.iter().zip(instance.phase_states.iter_mut()) {
-        let title = format!("[{}] {} \u{2014} {}", phase.role, phase.phase_id, handoff.title);
+        let title = format!(
+            "[{}] {} \u{2014} {}",
+            phase.role, phase.phase_id, handoff.title
+        );
 
         // Build a structured task packet for this phase.
         let write_scope = handoff
@@ -751,7 +754,8 @@ mod tests {
                 project_root: &str,
                 options: &TaskOptions,
             ) -> Result<String, DispatchError> {
-                self.inner.create_task(title, description, project_root, options)
+                self.inner
+                    .create_task(title, description, project_root, options)
             }
 
             fn create_subtask(
@@ -762,7 +766,8 @@ mod tests {
                 options: &TaskOptions,
             ) -> Result<String, DispatchError> {
                 self.subtask_titles.borrow_mut().push(title.to_string());
-                self.inner.create_subtask(parent_id, title, description, options)
+                self.inner
+                    .create_subtask(parent_id, title, description, options)
             }
 
             fn assign_task(
@@ -1166,7 +1171,8 @@ mod tests {
                 project_root: &str,
                 options: &TaskOptions,
             ) -> Result<String, DispatchError> {
-                self.inner.create_task(title, description, project_root, options)
+                self.inner
+                    .create_task(title, description, project_root, options)
             }
 
             fn create_subtask(
@@ -1177,7 +1183,8 @@ mod tests {
                 options: &TaskOptions,
             ) -> Result<String, DispatchError> {
                 self.subtask_options.borrow_mut().push(options.clone());
-                self.inner.create_subtask(parent_id, title, description, options)
+                self.inner
+                    .create_subtask(parent_id, title, description, options)
             }
 
             fn assign_task(

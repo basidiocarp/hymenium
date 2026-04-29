@@ -73,7 +73,10 @@ fn workflow_gate_blocks_audit_without_real_diff_and_verification() {
     let evaluator = EvidenceGateEvaluator::new(task);
     let ctx = make_context();
 
-    let conditions = [GateCondition::CodeDiffExists, GateCondition::VerificationPassed];
+    let conditions = [
+        GateCondition::CodeDiffExists,
+        GateCondition::VerificationPassed,
+    ];
     let eval = evaluator
         .evaluate_all(&conditions, &ctx)
         .expect("evaluate_all");
@@ -90,7 +93,10 @@ fn workflow_gate_passes_audit_with_both_evidence_types() {
     let evaluator = EvidenceGateEvaluator::new(task);
     let ctx = make_context();
 
-    let conditions = [GateCondition::CodeDiffExists, GateCondition::VerificationPassed];
+    let conditions = [
+        GateCondition::CodeDiffExists,
+        GateCondition::VerificationPassed,
+    ];
     let eval = evaluator
         .evaluate_all(&conditions, &ctx)
         .expect("evaluate_all");
@@ -109,7 +115,10 @@ fn workflow_gate_partial_evidence_diff_only_still_blocks() {
     let evaluator = EvidenceGateEvaluator::new(task);
     let ctx = make_context();
 
-    let conditions = [GateCondition::CodeDiffExists, GateCondition::VerificationPassed];
+    let conditions = [
+        GateCondition::CodeDiffExists,
+        GateCondition::VerificationPassed,
+    ];
     let eval = evaluator
         .evaluate_all(&conditions, &ctx)
         .expect("evaluate_all");

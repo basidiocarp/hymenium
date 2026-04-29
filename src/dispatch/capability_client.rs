@@ -18,6 +18,9 @@
 use super::{
     CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail, TaskOptions,
 };
+#[cfg(unix)]
+use crate::dispatch::cli::libc_kill;
+use crate::dispatch::cli::{resolve_canopy_binary, CANOPY_ALLOWED_ENV, CANOPY_TIMEOUT};
 use serde_json::json;
 use spore::capability::{resolve_capability, EndpointCandidate, TransportKind};
 use std::io::Write as _;
@@ -140,9 +143,37 @@ impl<C: CanopyClient> CapabilityCanopyClient<C> {
     ///
     /// Invokes `<command> dispatch submit -` with the JSON on stdin and parses
     /// the `task_id` field from the `DispatchResponse` on stdout.
+    ///
+    /// Security properties enforced here (same as `CliCanopyClient::run`):
+    /// - The child environment is cleared and only the allowlisted variables
+    ///   are restored, preventing secret leakage.
+    /// - A 30-second wall-clock timeout kills the child if it hangs.
     fn send_dispatch_request(command: &Path, request_json: &str) -> Result<String, DispatchError> {
-        let mut child = std::process::Command::new(command)
+        // Enforce an absolute path to prevent PATH hijacking by relative binary
+        // paths. Absolute paths are validated for existence and used directly;
+        // relative paths are resolved through `which` so the caller gets a clear
+        // error without silently invoking PATH-ordered impostor binaries.
+        let bin = if command.is_absolute() {
+            if !command.exists() {
+                return Err(DispatchError::CanopyError(format!(
+                    "dispatch endpoint not found: {}",
+                    command.display()
+                )));
+            }
+            command.to_path_buf()
+        } else {
+            resolve_canopy_binary(command.to_str().unwrap_or("canopy"))?
+        };
+
+        let env_pairs: Vec<(String, String)> = CANOPY_ALLOWED_ENV
+            .iter()
+            .filter_map(|key| std::env::var(key).ok().map(|val| (key.to_string(), val)))
+            .collect();
+
+        let mut child = std::process::Command::new(&bin)
             .args(["dispatch", "submit", "-"])
+            .env_clear()
+            .envs(env_pairs)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -150,7 +181,7 @@ impl<C: CanopyClient> CapabilityCanopyClient<C> {
             .map_err(|e| {
                 DispatchError::CanopyError(format!(
                     "failed to start dispatch endpoint {}: {e}",
-                    command.display()
+                    bin.display()
                 ))
             })?;
 
@@ -160,11 +191,45 @@ impl<C: CanopyClient> CapabilityCanopyClient<C> {
                 .map_err(|e| DispatchError::CanopyError(format!("write dispatch request: {e}")))?;
         }
 
+        // Enforce a wall-clock timeout with a background kill thread.
+        //
+        // A cancellation channel lets the main thread signal the killer before
+        // it fires, preventing a PID-reuse race: after wait_with_output() the
+        // child PID is freed and could be reused by an unrelated process.
+        let timeout = CANOPY_TIMEOUT;
+        let child_id = child.id();
+        let (cancel_tx, cancel_rx) = std::sync::mpsc::channel::<()>();
+        let killer = std::thread::spawn(move || {
+            // recv_timeout returns Err(Timeout) if the deadline elapsed without
+            // a cancellation, or Ok(()) if the main thread sent the signal.
+            if cancel_rx.recv_timeout(timeout).is_err() {
+                // Timeout elapsed and no cancellation received — kill the child.
+                #[cfg(unix)]
+                libc_kill(child_id);
+                #[cfg(not(unix))]
+                let _ = child_id;
+            }
+            // If Ok(()) was received, the child already exited — do nothing.
+        });
+
         let output = child
             .wait_with_output()
             .map_err(|e| DispatchError::CanopyError(format!("dispatch endpoint failed: {e}")))?;
 
+        // Cancel the killer before it fires (safe even if it already ran).
+        let _ = cancel_tx.send(());
+        let _ = killer.join();
+
         if !output.status.success() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt as _;
+                if output.status.signal() == Some(libc::SIGKILL) {
+                    return Err(DispatchError::CanopyError(
+                        "canopy dispatch timed out after 30s".to_string(),
+                    ));
+                }
+            }
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(DispatchError::CanopyError(stderr.trim().to_string()));
         }

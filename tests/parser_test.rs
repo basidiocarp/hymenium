@@ -323,8 +323,14 @@ fn test_missing_section_error_lists_aliases() {
     let err = result.unwrap_err();
     let error_str = format!("{}", err);
     // Error message should contain multiple accepted headings for Problem section
-    assert!(error_str.contains("Problem"), "Error should mention 'Problem' section");
-    assert!(error_str.contains("accepted headings"), "Error should list accepted headings");
+    assert!(
+        error_str.contains("Problem"),
+        "Error should mention 'Problem' section"
+    );
+    assert!(
+        error_str.contains("accepted headings"),
+        "Error should list accepted headings"
+    );
 }
 
 #[test]
@@ -346,7 +352,10 @@ fn test_centralcommand_fixture_parses() {
     assert!(!metadata.allowed_write_scope.is_empty());
 
     // Verify source_scope was parsed
-    assert!(metadata.source_scope.is_some(), "source_scope should be parsed");
+    assert!(
+        metadata.source_scope.is_some(),
+        "source_scope should be parsed"
+    );
     let source_scope = metadata.source_scope.unwrap();
     assert!(!source_scope.is_empty(), "source_scope should not be empty");
 

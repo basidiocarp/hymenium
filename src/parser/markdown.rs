@@ -26,7 +26,10 @@ fn build_section_aliases() -> HashMap<String, (SectionType, Vec<String>)> {
     // Problem section
     let problem_aliases = vec!["## Problem".to_string()];
     for alias in &problem_aliases {
-        aliases.insert(normalize_heading(alias), (SectionType::Problem, problem_aliases.clone()));
+        aliases.insert(
+            normalize_heading(alias),
+            (SectionType::Problem, problem_aliases.clone()),
+        );
     }
 
     // What exists section
@@ -35,7 +38,10 @@ fn build_section_aliases() -> HashMap<String, (SectionType, Vec<String>)> {
         "## What exists (state)".to_string(),
     ];
     for alias in &what_exists_aliases {
-        aliases.insert(normalize_heading(alias), (SectionType::WhatExists, what_exists_aliases.clone()));
+        aliases.insert(
+            normalize_heading(alias),
+            (SectionType::WhatExists, what_exists_aliases.clone()),
+        );
     }
 
     // What needs doing section
@@ -44,19 +50,28 @@ fn build_section_aliases() -> HashMap<String, (SectionType, Vec<String>)> {
         "## What needs doing (intent)".to_string(),
     ];
     for alias in &what_needs_aliases {
-        aliases.insert(normalize_heading(alias), (SectionType::WhatNeedsDoing, what_needs_aliases.clone()));
+        aliases.insert(
+            normalize_heading(alias),
+            (SectionType::WhatNeedsDoing, what_needs_aliases.clone()),
+        );
     }
 
     // Completion Protocol section
     let completion_aliases = vec!["## Completion Protocol".to_string()];
     for alias in &completion_aliases {
-        aliases.insert(normalize_heading(alias), (SectionType::CompletionProtocol, completion_aliases.clone()));
+        aliases.insert(
+            normalize_heading(alias),
+            (SectionType::CompletionProtocol, completion_aliases.clone()),
+        );
     }
 
     // Context section
     let context_aliases = vec!["## Context".to_string()];
     for alias in &context_aliases {
-        aliases.insert(normalize_heading(alias), (SectionType::Context, context_aliases.clone()));
+        aliases.insert(
+            normalize_heading(alias),
+            (SectionType::Context, context_aliases.clone()),
+        );
     }
 
     aliases
@@ -77,7 +92,11 @@ fn normalize_heading(heading: &str) -> String {
 }
 
 /// Check if a line matches a section heading (case-insensitive, alias-aware).
-fn matches_section(line: &str, section_type: SectionType, aliases: &HashMap<String, (SectionType, Vec<String>)>) -> bool {
+fn matches_section(
+    line: &str,
+    section_type: SectionType,
+    aliases: &HashMap<String, (SectionType, Vec<String>)>,
+) -> bool {
     let normalized = normalize_heading(line);
     if let Some((matched_type, _)) = aliases.get(&normalized) {
         *matched_type == section_type
@@ -120,7 +139,8 @@ pub fn parse_handoff(content: &str) -> Result<ParsedHandoff, ParseError> {
     let state = extract_list_section_by_type(&lines, SectionType::WhatExists, &aliases);
     let intent = extract_section_by_type(&lines, SectionType::WhatNeedsDoing, &aliases)?;
     let steps = extract_steps(&lines)?;
-    let completion_protocol = extract_section_by_type(&lines, SectionType::CompletionProtocol, &aliases).ok();
+    let completion_protocol =
+        extract_section_by_type(&lines, SectionType::CompletionProtocol, &aliases).ok();
     let context = extract_section_by_type(&lines, SectionType::Context, &aliases).ok();
 
     Ok(ParsedHandoff {
@@ -201,10 +221,12 @@ fn extract_metadata(lines: &[&str]) -> Option<HandoffMetadata> {
                         .collect();
                 }
                 "Source read scope" | "Read scope" => {
-                    metadata.source_scope = Some(split_scope(&value.1)
-                        .into_iter()
-                        .map(std::string::ToString::to_string)
-                        .collect());
+                    metadata.source_scope = Some(
+                        split_scope(&value.1)
+                            .into_iter()
+                            .map(std::string::ToString::to_string)
+                            .collect(),
+                    );
                 }
                 "Cross-repo edits" if !value.1.to_lowercase().contains("none") => {
                     metadata.cross_repo_rule = Some(value.1);
@@ -347,7 +369,6 @@ fn extract_list_section_by_type(
 
     result
 }
-
 
 fn extract_steps(lines: &[&str]) -> Result<Vec<ParsedStep>, ParseError> {
     let mut steps = Vec::new();

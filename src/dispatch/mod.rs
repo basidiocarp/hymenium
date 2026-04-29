@@ -13,7 +13,7 @@
 
 pub mod capability;
 pub mod capability_client;
-mod cli;
+pub mod cli;
 mod mock;
 mod orchestrate;
 pub mod task_packet;

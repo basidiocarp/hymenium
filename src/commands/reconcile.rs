@@ -82,7 +82,9 @@ fn print_summary(
                 if *advanced {
                     println!("  phase {phase_id}: completed — advanced to next phase");
                 } else {
-                    println!("  phase {phase_id}: completed — no further advance (gate or final phase)");
+                    println!(
+                        "  phase {phase_id}: completed — no further advance (gate or final phase)"
+                    );
                 }
             }
             PhaseReconcileOutcome::MarkedFailed { phase_id, reason } => {
@@ -111,8 +113,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time goes forward")
             .subsec_nanos();
-        let path =
-            std::env::temp_dir().join(format!("hymenium_reconcile_cmd_{nanos}.db"));
+        let path = std::env::temp_dir().join(format!("hymenium_reconcile_cmd_{nanos}.db"));
         WorkflowStore::open(&path).expect("open store")
     }
 
@@ -139,13 +140,8 @@ mod tests {
 
         // Pre-seed mock with completed implement task.
         let mock = MockCanopyClient::new();
-        mock.create_task(
-            "implement",
-            "desc",
-            ".",
-            &TaskOptions::default(),
-        )
-        .expect("create");
+        mock.create_task("implement", "desc", ".", &TaskOptions::default())
+            .expect("create");
         // Manually insert the task that the phase is waiting on.
         // We need to inject it with the right ID and status.
         // MockCanopyClient doesn't expose set_task_status directly;
@@ -201,7 +197,10 @@ mod tests {
             }
             fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
                 let statuses = self.task_statuses.borrow();
-                let status = statuses.get(task_id).cloned().unwrap_or_else(|| "active".to_string());
+                let status = statuses
+                    .get(task_id)
+                    .cloned()
+                    .unwrap_or_else(|| "active".to_string());
                 Ok(TaskDetail {
                     task_id: task_id.to_string(),
                     title: "test task".to_string(),
@@ -213,10 +212,7 @@ mod tests {
                     has_verification_passed: false,
                 })
             }
-            fn check_completeness(
-                &self,
-                _path: &str,
-            ) -> Result<CompletenessReport, DispatchError> {
+            fn check_completeness(&self, _path: &str) -> Result<CompletenessReport, DispatchError> {
                 Ok(CompletenessReport {
                     complete: true,
                     total_items: 0,

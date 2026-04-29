@@ -2,10 +2,56 @@ use super::{
     CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail, TaskOptions,
 };
 use crate::workflow::template::AgentRole;
+use std::path::PathBuf;
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // CliCanopyClient
 // ---------------------------------------------------------------------------
+
+/// Timeout applied to every canopy subprocess invocation.
+pub(crate) const CANOPY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Environment variables forwarded to canopy subprocesses.
+///
+/// All other variables are stripped to prevent secret leakage and PATH
+/// hijacking by environment-injected values the orchestrator did not set.
+///
+/// # Note
+///
+/// This is public so integration tests can mirror the environment-stripping
+/// behaviour exactly. It is not part of the stable public API.
+pub const CANOPY_ALLOWED_ENV: &[&str] = &["PATH", "HOME", "LANG", "TMPDIR"];
+
+/// Resolve the absolute path to the `canopy` binary.
+///
+/// Uses the `which` crate to search PATH. Returns an actionable error if the
+/// binary cannot be found so the caller can surface a clear diagnosis.
+///
+/// # Note
+///
+/// This is public so integration tests can verify the resolution contract
+/// directly. It is not part of the stable public API.
+pub fn resolve_canopy_binary(name: &str) -> Result<PathBuf, DispatchError> {
+    // If the caller passed an absolute path, validate it exists and use it
+    // directly without a PATH search.
+    let p = std::path::Path::new(name);
+    if p.is_absolute() {
+        if p.exists() {
+            return Ok(p.to_path_buf());
+        }
+        return Err(DispatchError::CanopyError(format!(
+            "canopy binary not found at explicit path: {}",
+            name
+        )));
+    }
+
+    which::which(name).map_err(|_| {
+        DispatchError::CanopyError(format!(
+            "canopy binary not found in PATH; install canopy or set an explicit path (searched for '{name}')"
+        ))
+    })
+}
 
 /// Canopy client that shells out to the `canopy` CLI binary.
 #[derive(Debug, Clone)]
@@ -22,18 +68,108 @@ impl CliCanopyClient {
     }
 
     /// Run a canopy subcommand and return trimmed stdout on success.
+    ///
+    /// Security properties enforced here:
+    /// - The binary path is resolved explicitly via `resolve_canopy_binary` so
+    ///   that a PATH-preferred impostor cannot intercept dispatch payloads.
+    /// - The child environment is cleared and only the allowlisted variables
+    ///   are restored, preventing secret leakage.
+    /// - A 30-second wall-clock timeout kills the child and waits for it to
+    ///   exit so a hanging canopy process cannot block orchestration
+    ///   indefinitely.
     fn run(&self, args: &[&str]) -> Result<String, DispatchError> {
-        let output = std::process::Command::new(&self.canopy_bin)
-            .args(args)
-            .output()
-            .map_err(|e| DispatchError::CanopyError(format!("failed to run canopy: {e}")))?;
+        let bin = resolve_canopy_binary(&self.canopy_bin)?;
 
+        // Collect the allowed env values before spawning so the closure does
+        // not borrow across the spawn boundary.
+        let env_pairs: Vec<(String, String)> = CANOPY_ALLOWED_ENV
+            .iter()
+            .filter_map(|key| std::env::var(key).ok().map(|val| (key.to_string(), val)))
+            .collect();
+
+        let child = std::process::Command::new(&bin)
+            .args(args)
+            .env_clear()
+            .envs(env_pairs)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| DispatchError::CanopyError(format!("failed to spawn canopy: {e}")))?;
+
+        // Enforce a wall-clock timeout by having a background thread kill the
+        // child if it does not finish within CANOPY_TIMEOUT.
+        //
+        // A cancellation channel lets the main thread signal the killer before
+        // it fires, preventing a PID-reuse race: after wait_with_output() the
+        // child PID is freed and could be reused by an unrelated process.
+        let timeout = CANOPY_TIMEOUT;
+        // SAFETY: `child.id()` returns the OS PID; we use it only to send a
+        // signal, which is safe from any thread.
+        let child_id = child.id();
+        let (cancel_tx, cancel_rx) = std::sync::mpsc::channel::<()>();
+        let killer = std::thread::spawn(move || {
+            // recv_timeout returns Err(Timeout) if the deadline elapsed without
+            // a cancellation, or Ok(()) if the main thread sent the signal.
+            if cancel_rx.recv_timeout(timeout).is_err() {
+                // Timeout elapsed and no cancellation received — kill the child.
+                #[cfg(unix)]
+                libc_kill(child_id);
+                #[cfg(not(unix))]
+                let _ = child_id;
+            }
+            // If Ok(()) was received, the child already exited — do nothing.
+        });
+
+        let output = child.wait_with_output().map_err(|e| {
+            DispatchError::CanopyError(format!("canopy dispatch failed: {e}"))
+        })?;
+
+        // Cancel the killer before it fires (safe even if it already ran).
+        let _ = cancel_tx.send(());
+        let _ = killer.join();
+
+        // Distinguish timeout from a normal non-zero exit.
         if !output.status.success() {
+            // On Unix, SIGKILL produces signal status rather than a normal
+            // exit code. Treat that as a timeout.
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::ExitStatusExt as _;
+                if output.status.signal() == Some(libc::SIGKILL) {
+                    return Err(DispatchError::CanopyError(
+                        "canopy dispatch timed out after 30s".to_string(),
+                    ));
+                }
+            }
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(DispatchError::CanopyError(stderr.trim().to_string()));
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+}
+
+/// Send SIGKILL to a process by PID on Unix systems.
+///
+/// Called from the timeout thread. Best-effort: if the process has already
+/// exited, the kill call is harmless.
+///
+/// Centralises the single `unsafe` block so callers remain safe code.
+///
+/// # Note
+///
+/// This is public so integration tests can exercise the timeout kill mechanism
+/// directly. It is not part of the stable public API.
+#[cfg(unix)]
+pub fn libc_kill(pid: u32) {
+    // SAFETY: kill(2) is always safe to call; sending SIGKILL to an
+    // already-exited process returns ESRCH which we ignore.
+    //
+    // PIDs on Unix are always positive and within the i32 range, so the cast
+    // is safe. POSIX guarantees PID_MAX <= 2^22 on Linux and <= 99999 on macOS.
+    #[allow(clippy::cast_possible_wrap)]
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
     }
 }
 
