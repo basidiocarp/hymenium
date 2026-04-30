@@ -19,10 +19,12 @@
 //!
 //! This module embeds the capability registry and runtime lease types from
 //! the `capability-registry-v1` and `capability-runtime-lease-v1` Septa
-//! contracts. These were inlined here because spore v0.4.11 (the ecosystem
-//! workspace pin) does not yet export a `capability` module; the types were
-//! added in a later commit. This keeps hymenium at the ecosystem pin without
-//! waiting for a spore release.
+//! contracts, along with the two path helpers they depend on. All of this
+//! surface was added to spore in commits after the v0.4.11 ecosystem workspace
+//! pin (`0bc2e878`); it is inlined here so hymenium can stay at the ecosystem
+//! pin without waiting for the next spore release. The path computation matches
+//! what spore's helpers would return: `data_dir("basidiocarp")` with the
+//! standard filenames.
 
 use super::{
     CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail, TaskOptions,
