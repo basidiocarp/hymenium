@@ -14,6 +14,15 @@
 //!
 //! The CLI fallback remains tested and isolated. New system-to-system dispatch
 //! should prefer the typed endpoint; do not add further CLI-only integration paths.
+//!
+//! # Capability types
+//!
+//! This module embeds the capability registry and runtime lease types from
+//! the `capability-registry-v1` and `capability-runtime-lease-v1` Septa
+//! contracts. These were inlined here because spore v0.4.11 (the ecosystem
+//! workspace pin) does not yet export a `capability` module; the types were
+//! added in a later commit. This keeps hymenium at the ecosystem pin without
+//! waiting for a spore release.
 
 use super::{
     CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail, TaskOptions,
@@ -21,17 +30,227 @@ use super::{
 #[cfg(unix)]
 use crate::dispatch::cli::libc_kill;
 use crate::dispatch::cli::{resolve_canopy_binary, CANOPY_ALLOWED_ENV, CANOPY_TIMEOUT};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-use spore::capability::{resolve_capability, EndpointCandidate, TransportKind};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Capability ID for Canopy's dispatch intake endpoint.
-pub const DISPATCH_CAPABILITY: &str = "workflow.dispatch.v1";
+// ---------------------------------------------------------------------------
+// Inline capability types (capability-registry-v1 and capability-runtime-lease-v1)
+// ---------------------------------------------------------------------------
+
+/// Transport kind used to call a capability endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum TransportKind {
+    /// MCP over stdin/stdout.
+    Stdio,
+    /// Unix domain socket.
+    UnixSocket,
+    /// TCP endpoint.
+    Tcp,
+    /// Subprocess invocation via CLI.
+    Cli,
+}
+
+/// Who manages a registry entry installation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum CapabilityManager {
+    Stipe,
+    Manual,
+    #[serde(rename = "self")]
+    SelfManaged,
+}
+
+/// Last known health state for a registry entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum RegistryHealthStatus {
+    Ok,
+    Degraded,
+    Missing,
+}
+
+/// Health hint stored in the installed registry entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryHealthHint {
+    pub status: RegistryHealthStatus,
+    pub message: Option<String>,
+}
+
+/// One entry in the installed capability registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryEntry {
+    pub tool: String,
+    pub version: String,
+    pub manager: CapabilityManager,
+    pub capability_ids: Vec<String>,
+    pub contract_ids: Vec<String>,
+    pub transport: TransportKind,
+    pub binary_path: Option<String>,
+    pub health: Option<RegistryHealthHint>,
+}
+
+/// Parsed `capability-registry-v1` payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityRegistry {
+    pub schema_version: String,
+    pub written_at_unix: u64,
+    pub entries: Vec<RegistryEntry>,
+}
+
+/// Self-reported health status in a runtime lease.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum LeaseHealthStatus {
+    Ok,
+    Degraded,
+}
+
+/// Health hint in a runtime lease.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeaseHealthHint {
+    pub status: LeaseHealthStatus,
+    pub message: Option<String>,
+}
+
+/// Parsed `capability-runtime-lease-v1` payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeLease {
+    pub schema_version: String,
+    pub tool: String,
+    pub capability_id: String,
+    pub transport: TransportKind,
+    pub pid: u32,
+    pub leased_at_unix: u64,
+    pub expires_at_unix: Option<u64>,
+    pub endpoint: Option<String>,
+    pub command: Option<String>,
+    pub version: Option<String>,
+    pub health: Option<LeaseHealthHint>,
+}
+
+impl RuntimeLease {
+    /// Returns `true` when this lease has passed its `expires_at_unix` deadline.
+    fn is_expired(&self) -> bool {
+        let Some(expires) = self.expires_at_unix else {
+            return false;
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        now > expires
+    }
+}
+
+/// A resolved endpoint candidate for a requested capability id.
+#[derive(Debug, Clone)]
+pub struct EndpointCandidate {
+    pub tool: String,
+    pub transport: TransportKind,
+    pub endpoint: Option<String>,
+    pub command: Option<PathBuf>,
+    pub version: Option<String>,
+    /// Whether this candidate came from a live runtime lease (true) or the
+    /// installed registry fallback (false).
+    pub from_lease: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Capability resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve a capability id to a preferred endpoint candidate.
+///
+/// Checks runtime leases first (live endpoints), then falls back to the
+/// installed registry. Returns the first non-stale match, or `None` when
+/// neither source has the capability.
+fn resolve_capability(
+    capability_id: &str,
+    registry_path: &Path,
+    lease_dir: &Path,
+) -> anyhow::Result<Option<EndpointCandidate>> {
+    // Step 1: check live leases first.
+    let leases = load_leases(lease_dir);
+    for lease in &leases {
+        if lease.capability_id == capability_id && !lease.is_expired() {
+            return Ok(Some(EndpointCandidate {
+                tool: lease.tool.clone(),
+                transport: lease.transport.clone(),
+                endpoint: lease.endpoint.clone(),
+                command: lease.command.as_deref().map(PathBuf::from),
+                version: lease.version.clone(),
+                from_lease: true,
+            }));
+        }
+    }
+
+    // Step 2: fall back to the installed registry.
+    let Some(registry) = load_registry(registry_path)? else {
+        return Ok(None);
+    };
+
+    for entry in &registry.entries {
+        if entry.capability_ids.iter().any(|id| id == capability_id) {
+            if matches!(
+                entry.health.as_ref().map(|h| &h.status),
+                Some(RegistryHealthStatus::Missing)
+            ) {
+                continue;
+            }
+            return Ok(Some(EndpointCandidate {
+                tool: entry.tool.clone(),
+                transport: entry.transport.clone(),
+                endpoint: None,
+                command: entry.binary_path.as_deref().map(PathBuf::from),
+                version: Some(entry.version.clone()),
+                from_lease: false,
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
+fn load_leases(dir: &Path) -> Vec<RuntimeLease> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(std::result::Result::ok)
+        .filter(|e| {
+            e.path()
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+        })
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .filter_map(|content| serde_json::from_str::<RuntimeLease>(&content).ok())
+        .collect()
+}
+
+fn load_registry(path: &Path) -> anyhow::Result<Option<CapabilityRegistry>> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(Some(serde_json::from_str(&content)?)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(anyhow::anyhow!(
+            "failed to read capability registry at {}: {e}",
+            path.display()
+        )),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Request builder
 // ---------------------------------------------------------------------------
+
+/// Capability ID for Canopy's dispatch intake endpoint.
+pub const DISPATCH_CAPABILITY: &str = "workflow.dispatch.v1";
 
 /// Build a `dispatch-request-v1` JSON payload from task-creation arguments.
 ///
@@ -98,8 +317,9 @@ impl<C: CanopyClient> CapabilityCanopyClient<C> {
     /// by `stipe init`.
     pub fn new(fallback: C) -> Self {
         Self {
-            registry_path: spore::paths::capability_registry_path(),
-            lease_dir: spore::paths::capability_lease_dir(),
+            registry_path: spore::paths::data_dir("basidiocarp")
+                .join("capability-registry.json"),
+            lease_dir: spore::paths::data_dir("basidiocarp").join("leases"),
             fallback,
         }
     }
@@ -336,9 +556,6 @@ impl<C: CanopyClient> CanopyClient for CapabilityCanopyClient<C> {
 mod tests {
     use super::*;
     use crate::dispatch::{MockCanopyClient, TaskOptions};
-    use spore::capability::{
-        CapabilityManager, RegistryEntry, RuntimeLease, TransportKind as SporeTransportKind,
-    };
     use std::fs;
 
     fn temp_dir() -> tempfile::TempDir {
@@ -447,7 +664,7 @@ mod tests {
             schema_version: "1.0".to_string(),
             tool: "canopy".to_string(),
             capability_id: DISPATCH_CAPABILITY.to_string(),
-            transport: SporeTransportKind::Cli,
+            transport: TransportKind::Cli,
             pid: 99999,
             leased_at_unix: 1,
             expires_at_unix: Some(1), // always in the past

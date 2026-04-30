@@ -17,7 +17,7 @@ clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-spore = { git = "https://github.com/basidiocarp/spore", rev = "a3c7f5bf8f4025b7a507f44d68a338244ad2d6e4" }
+spore = { git = "https://github.com/basidiocarp/spore", rev = "0bc2e878010e75e30e26fa517d747e97d59628b0" }
 thiserror = "2"
 rusqlite = { version = "0.39", features = ["bundled"] }
 tracing = "0.1"
