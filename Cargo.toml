@@ -23,7 +23,7 @@ rusqlite = { version = "0.39", features = ["bundled"] }
 tracing = "0.1"
 ulid = "1"
 toml = "1"
-which = "6"
+which = "7"
 libc = "0.2"
 
 [dev-dependencies]
