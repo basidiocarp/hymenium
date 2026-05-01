@@ -64,7 +64,7 @@ jobs:
         shell: bash
 
       - name: Smoke test
-        if: matrix.cross != 'true'
+        if: ${{ !matrix.cross }}
         run: |
           set -euo pipefail
           BINARY=target/${{ matrix.target }}/release/hymenium
