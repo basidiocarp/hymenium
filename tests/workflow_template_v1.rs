@@ -12,9 +12,7 @@ fn workflow_template_v1_round_trip() {
     let manifest_dir =
         std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set by cargo");
     let fixture_path = std::path::Path::new(&manifest_dir)
-        .parent()
-        .expect("manifest dir should have a parent (workspace root)")
-        .join("septa/fixtures/workflow-template-v1.example.json");
+        .join("tests/fixtures/workflow-template-v1.example.json");
 
     let json = std::fs::read_to_string(&fixture_path).unwrap_or_else(|e| {
         panic!(

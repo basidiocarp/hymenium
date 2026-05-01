@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.1",
+  "template_id": "impl-audit",
+  "name": "Implementer/Auditor",
+  "description": "Two-phase workflow for implementation handoffs with post-implementation audit. The implementer executes the planned work and verifies it locally. The auditor reviews the code diff, checks for regressions, and validates that all verification evidence is solid before closure.",
+  "phases": [
+    {
+      "phase_id": "implement",
+      "role": "implementer",
+      "agent_role": "Worker",
+      "agent_tier": "sonnet",
+      "entry_gate": {
+        "requires": []
+      },
+      "exit_gate": {
+        "requires": ["code_diff_exists", "verification_passed"]
+      }
+    },
+    {
+      "phase_id": "audit",
+      "role": "auditor",
+      "agent_role": "Output Verifier",
+      "agent_tier": "sonnet",
+      "entry_gate": {
+        "requires": ["code_diff_exists", "verification_passed"]
+      },
+      "exit_gate": {
+        "requires": ["audit_clean", "findings_resolved"]
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from_phase": "implement",
+      "to_phase": "audit",
+      "condition": "Implementation complete with verification evidence"
+    }
+  ]
+}
