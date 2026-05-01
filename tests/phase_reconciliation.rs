@@ -101,7 +101,7 @@ impl CanopyClient for StatusMock {
 
 /// Build a workflow instance in the "just dispatched" state:
 /// - All phases are `Pending`
-/// - Phase states have canopy_task_id populated
+/// - Phase states have `canopy_task_id` populated
 /// - Status is `Dispatched`
 fn dispatched_instance(id: &str) -> WorkflowInstance {
     let template = impl_audit_default();

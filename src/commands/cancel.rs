@@ -103,8 +103,7 @@ mod tests {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
+            .map_or(0, |d| d.subsec_nanos());
         let db_path = std::env::temp_dir().join(format!("hymenium_cancel_test_{nanos}.db"));
         WorkflowStore::open(&db_path).expect("open store")
     }

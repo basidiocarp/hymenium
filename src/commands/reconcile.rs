@@ -133,7 +133,11 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::items_after_statements)]
     fn reconcile_command_completes_phase_when_canopy_done() {
+        use crate::dispatch::{CanopyClient, CompletenessReport, DispatchError, ImportResult};
+        use std::cell::RefCell;
+
         let store = tmp_store();
         let instance = dispatched_instance("wf-cmd-1");
         store.insert_workflow(&instance).expect("insert");
@@ -148,8 +152,6 @@ mod tests {
         // use a custom mock approach.
 
         // Build a mock that knows the specific task IDs.
-        use crate::dispatch::{CanopyClient, CompletenessReport, DispatchError, ImportResult};
-        use std::cell::RefCell;
 
         struct FixedStatusMock {
             task_statuses: RefCell<std::collections::HashMap<String, String>>,

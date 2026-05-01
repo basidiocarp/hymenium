@@ -120,9 +120,9 @@ impl CliCanopyClient {
             // If Ok(()) was received, the child already exited — do nothing.
         });
 
-        let output = child.wait_with_output().map_err(|e| {
-            DispatchError::CanopyError(format!("canopy dispatch failed: {e}"))
-        })?;
+        let output = child
+            .wait_with_output()
+            .map_err(|e| DispatchError::CanopyError(format!("canopy dispatch failed: {e}")))?;
 
         // Cancel the killer before it fires (safe even if it already ran).
         let _ = cancel_tx.send(());
@@ -161,6 +161,7 @@ impl CliCanopyClient {
 /// This is public so integration tests can exercise the timeout kill mechanism
 /// directly. It is not part of the stable public API.
 #[cfg(unix)]
+#[allow(unsafe_code)]
 pub fn libc_kill(pid: u32) {
     // SAFETY: kill(2) is always safe to call; sending SIGKILL to an
     // already-exited process returns ESRCH which we ignore.

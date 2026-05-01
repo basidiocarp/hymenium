@@ -131,11 +131,7 @@ fn env_vars_are_stripped_from_child_process() {
     let script_dir = TempDir::new().unwrap();
 
     // Script: print every env var (key=value) to stdout.
-    let env_dumper = write_script(
-        &script_dir,
-        "env-dumper",
-        "env\n",
-    );
+    let env_dumper = write_script(&script_dir, "env-dumper", "env\n");
 
     // Inject a secret into the current process's environment.
     let secret_key = "HYMENIUM_TEST_SECRET_12345";

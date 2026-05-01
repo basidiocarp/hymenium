@@ -74,8 +74,7 @@ mod tests {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos())
-            .unwrap_or(0);
+            .map_or(0, |d| d.subsec_nanos());
         let path = std::env::temp_dir().join(format!("hymenium_outcomes_test_{nanos}.db"));
         WorkflowStore::open(&path).expect("open store")
     }

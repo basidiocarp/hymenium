@@ -319,8 +319,7 @@ impl<C: CanopyClient> CapabilityCanopyClient<C> {
     /// by `stipe init`.
     pub fn new(fallback: C) -> Self {
         Self {
-            registry_path: spore::paths::data_dir("basidiocarp")
-                .join("capability-registry.json"),
+            registry_path: spore::paths::data_dir("basidiocarp").join("capability-registry.json"),
             lease_dir: spore::paths::data_dir("basidiocarp").join("leases"),
             fallback,
         }
