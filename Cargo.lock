@@ -338,7 +338,7 @@ checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
 name = "hymenium"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -353,7 +353,7 @@ dependencies = [
  "toml",
  "tracing",
  "ulid",
- "which",
+ "which 8.0.2",
 ]
 
 [[package]]
@@ -797,7 +797,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
- "which",
+ "which 7.0.3",
 ]
 
 [[package]]
@@ -1140,6 +1140,15 @@ dependencies = [
  "env_home",
  "rustix",
  "winsafe",
+]
+
+[[package]]
+name = "which"
+version = "8.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81995fafaaaf6ae47a7d0cc83c67caf92aeb7e5331650ae6ff856f7c0c60c459"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
