@@ -228,6 +228,18 @@ impl WorkflowInstance {
         phase.mark_active();
         self.status = WorkflowStatus::InProgress;
         self.updated_at = Utc::now();
+
+        if let Some(template_phase) = self.current_template_phase() {
+            if let Some(rubric) = &template_phase.rubric {
+                tracing::info!(
+                    phase_id = %template_phase.phase_id,
+                    condition = %rubric.condition,
+                    probe_method = ?rubric.probe_method,
+                    "phase entry rubric attached"
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -246,6 +258,17 @@ impl WorkflowInstance {
 
         phase.mark_completed();
         self.updated_at = Utc::now();
+
+        if let Some(template_phase) = self.current_template_phase() {
+            if let Some(rubric) = &template_phase.rubric {
+                tracing::info!(
+                    phase_id = %template_phase.phase_id,
+                    condition = %rubric.condition,
+                    "phase exit rubric condition evaluated"
+                );
+            }
+        }
+
         Ok(())
     }
 

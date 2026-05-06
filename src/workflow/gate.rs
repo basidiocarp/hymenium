@@ -114,6 +114,36 @@ impl GateEvaluation {
     }
 }
 
+/// How the rubric condition is probed — deterministic only; LLM grading is out of scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProbeMethod {
+    /// Check that a file exists at the given path.
+    FileExists,
+    /// Check that the phase output contains the given string.
+    CanaryString,
+    /// Check that the phase exit code matches the given integer.
+    ExitCode,
+}
+
+/// Named rubric for phase verification.
+///
+/// When attached to a `Phase`, hymenium logs the condition and result at
+/// phase boundary transitions. When absent, gate behavior is unchanged.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PhaseRubric {
+    /// Human-readable description of what is being verified.
+    pub condition: String,
+    /// How to probe the condition.
+    pub probe_method: ProbeMethod,
+    /// What success looks like (used in log output).
+    pub pass_criteria: String,
+    /// What failure looks like (used in log output).
+    pub fail_criteria: String,
+    /// Patterns in output that indicate a known-benign state; bypass the rubric when found.
+    pub exclusions: Vec<String>,
+}
+
 /// Evaluates gate conditions for phase transitions.
 pub trait GateEvaluator {
     /// Evaluate a single gate condition.
@@ -412,5 +442,49 @@ mod tests {
             .expect("should evaluate");
         assert!(eval.passed);
         assert_eq!(eval.reason, "code_diff_exists satisfied");
+    }
+
+    #[test]
+    fn test_phase_rubric_roundtrip() {
+        let rubric = PhaseRubric {
+            condition: "build must succeed".to_string(),
+            probe_method: ProbeMethod::ExitCode,
+            pass_criteria: "exit code 0".to_string(),
+            fail_criteria: "exit code non-zero".to_string(),
+            exclusions: vec!["warning: unused variable".to_string()],
+        };
+
+        // Serialize to JSON value
+        let json_value = serde_json::to_value(&rubric).expect("should serialize");
+
+        // Deserialize back from JSON value
+        let rubric_deserialized: PhaseRubric =
+            serde_json::from_value(json_value).expect("should deserialize");
+
+        // Verify equality
+        assert_eq!(rubric.condition, rubric_deserialized.condition);
+        assert_eq!(rubric.probe_method, rubric_deserialized.probe_method);
+        assert_eq!(rubric.pass_criteria, rubric_deserialized.pass_criteria);
+        assert_eq!(rubric.fail_criteria, rubric_deserialized.fail_criteria);
+        assert_eq!(rubric.exclusions, rubric_deserialized.exclusions);
+    }
+
+    #[test]
+    fn test_probe_method_variants() {
+        let file_exists = ProbeMethod::FileExists;
+        let canary = ProbeMethod::CanaryString;
+        let exit = ProbeMethod::ExitCode;
+
+        assert_ne!(file_exists, canary);
+        assert_ne!(canary, exit);
+
+        // Test serialization of each variant
+        let json_file = serde_json::to_value(&file_exists).expect("should serialize");
+        let json_canary = serde_json::to_value(&canary).expect("should serialize");
+        let json_exit = serde_json::to_value(&exit).expect("should serialize");
+
+        assert_eq!(json_file.as_str(), Some("file_exists"));
+        assert_eq!(json_canary.as_str(), Some("canary_string"));
+        assert_eq!(json_exit.as_str(), Some("exit_code"));
     }
 }

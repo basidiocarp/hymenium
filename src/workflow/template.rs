@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 
+use super::gate::PhaseRubric;
+
 /// Error type for template operations.
 #[derive(Debug, Error)]
 pub enum TemplateError {
@@ -121,6 +123,10 @@ pub struct Phase {
     pub agent_tier: AgentTier,
     pub entry_gate: Gate,
     pub exit_gate: Gate,
+    /// Optional rubric for phase verification.
+    /// When present, hymenium logs the rubric condition at phase boundary transitions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rubric: Option<PhaseRubric>,
 }
 
 impl Phase {
@@ -296,6 +302,7 @@ pub fn impl_audit_default() -> WorkflowTemplate {
                         "verification_passed".to_string(),
                     ],
                 },
+                rubric: None,
             },
             Phase {
                 phase_id: "audit".to_string(),
@@ -311,6 +318,7 @@ pub fn impl_audit_default() -> WorkflowTemplate {
                 exit_gate: Gate {
                     requires: vec!["audit_clean".to_string(), "findings_resolved".to_string()],
                 },
+                rubric: None,
             },
         ],
         transitions: vec![Transition {
@@ -546,6 +554,7 @@ mod tests {
             agent_tier: AgentTier::Sonnet,
             entry_gate: Gate { requires: vec![] },
             exit_gate: Gate { requires: vec![] },
+            rubric: None,
         };
         assert_eq!(
             phase_no_agent_role.effective_agent_role(),
@@ -559,6 +568,7 @@ mod tests {
             agent_tier: AgentTier::Sonnet,
             entry_gate: Gate { requires: vec![] },
             exit_gate: Gate { requires: vec![] },
+            rubric: None,
         };
         assert_eq!(
             phase_auditor.effective_agent_role(),
@@ -572,6 +582,7 @@ mod tests {
             agent_tier: AgentTier::Sonnet,
             entry_gate: Gate { requires: vec![] },
             exit_gate: Gate { requires: vec![] },
+            rubric: None,
         };
         assert_eq!(
             phase_reviewer.effective_agent_role(),
@@ -585,6 +596,7 @@ mod tests {
             agent_tier: AgentTier::Sonnet,
             entry_gate: Gate { requires: vec![] },
             exit_gate: Gate { requires: vec![] },
+            rubric: None,
         };
         assert_eq!(
             phase_operator.effective_agent_role(),

@@ -11,7 +11,7 @@ pub mod template;
 pub use engine::{PhaseState, PhaseStatus, PhaseTransition, WorkflowInstance, WorkflowStatus};
 pub use gate::{
     EvidenceGateEvaluator, GateCondition, GateContext, GateEvaluation, GateEvaluator,
-    MockGateEvaluator,
+    MockGateEvaluator, PhaseRubric, ProbeMethod,
 };
 pub use template::{
     AgentRole, AgentTier, Gate, Phase, ProcessRole, TemplateRegistry, WorkflowTemplate,
