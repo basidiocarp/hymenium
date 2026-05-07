@@ -46,6 +46,10 @@ pub enum WorkflowStatus {
     BlockedOnGate,
     /// Phase output failed verification and is queued for repair.
     AwaitingRepair,
+    /// Workflow paused at a HandoffToUser checkpoint, awaiting operator input.
+    AwaitingUserInput,
+    /// Workflow terminated by operator via HandoffToUser breakout.
+    UserTerminated,
     Completed,
     Failed,
     Cancelled,
@@ -59,6 +63,8 @@ impl std::fmt::Display for WorkflowStatus {
             WorkflowStatus::InProgress => write!(f, "in_progress"),
             WorkflowStatus::BlockedOnGate => write!(f, "blocked_on_gate"),
             WorkflowStatus::AwaitingRepair => write!(f, "awaiting_repair"),
+            WorkflowStatus::AwaitingUserInput => write!(f, "awaiting_user_input"),
+            WorkflowStatus::UserTerminated => write!(f, "user_terminated"),
             WorkflowStatus::Completed => write!(f, "completed"),
             WorkflowStatus::Failed => write!(f, "failed"),
             WorkflowStatus::Cancelled => write!(f, "cancelled"),
@@ -72,6 +78,8 @@ impl std::fmt::Display for WorkflowStatus {
 pub enum PhaseStatus {
     Pending,
     Active,
+    /// Phase paused awaiting operator input via HandoffToUser.
+    AwaitingUserInput,
     Completed,
     Failed,
     Skipped,
@@ -82,6 +90,7 @@ impl std::fmt::Display for PhaseStatus {
         match self {
             PhaseStatus::Pending => write!(f, "pending"),
             PhaseStatus::Active => write!(f, "active"),
+            PhaseStatus::AwaitingUserInput => write!(f, "awaiting_user_input"),
             PhaseStatus::Completed => write!(f, "completed"),
             PhaseStatus::Failed => write!(f, "failed"),
             PhaseStatus::Skipped => write!(f, "skipped"),
@@ -101,6 +110,8 @@ pub struct PhaseState {
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub failure_reason: Option<String>,
+    /// Message surfaced to the operator when the phase enters AwaitingUserInput.
+    pub pending_message: Option<String>,
     pub retry_count: u32,
 }
 
@@ -116,6 +127,7 @@ impl PhaseState {
             started_at: None,
             completed_at: None,
             failure_reason: None,
+            pending_message: None,
             retry_count: 0,
         }
     }
@@ -296,6 +308,10 @@ impl WorkflowInstance {
             PhaseStatus::Active => {
                 phase.mark_completed();
             }
+            PhaseStatus::AwaitingUserInput => {
+                // Phase was paused awaiting user input; mark completed now.
+                phase.mark_completed();
+            }
             PhaseStatus::Completed => {
                 // Already completed — idempotent, nothing to do.
             }
@@ -334,6 +350,10 @@ impl WorkflowInstance {
                 phase.mark_failed();
             }
             PhaseStatus::Active => {
+                phase.failure_reason = Some(reason);
+                phase.mark_failed();
+            }
+            PhaseStatus::AwaitingUserInput => {
                 phase.failure_reason = Some(reason);
                 phase.mark_failed();
             }
@@ -568,6 +588,77 @@ impl WorkflowInstance {
         let completed = phase.completed_at?;
         Some(completed - started)
     }
+
+    /// Pause the current phase at a HandoffToUser checkpoint.
+    ///
+    /// If `breakout` is false: sets phase status to `AwaitingUserInput` and
+    /// workflow status to `AwaitingUserInput`. The message is stored on the
+    /// phase for operator display; use `resume_from_user_input` to continue.
+    ///
+    /// If `breakout` is true: sets phase status to `Failed` (the phase did not
+    /// complete) and workflow status to `UserTerminated`. The workflow is
+    /// terminal and cannot be resumed.
+    pub fn handoff_to_user_phase(
+        &mut self,
+        message: impl Into<String>,
+        breakout: bool,
+    ) -> WorkflowEngineResult<()> {
+        let phase = self
+            .current_phase_mut()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
+
+        if phase.status != PhaseStatus::Active {
+            return Err(WorkflowError::StateError(format!(
+                "cannot handoff_to_user from phase {} in status {:?}",
+                phase.phase_id, phase.status
+            )));
+        }
+
+        let message = message.into();
+
+        if breakout {
+            phase.failure_reason = Some(message.clone());
+            phase.mark_failed();
+            self.status = WorkflowStatus::UserTerminated;
+        } else {
+            phase.pending_message = Some(message);
+            phase.status = PhaseStatus::AwaitingUserInput;
+            self.status = WorkflowStatus::AwaitingUserInput;
+        }
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Resume a workflow paused at a HandoffToUser checkpoint.
+    ///
+    /// Requires the current phase to be in `AwaitingUserInput` status and the
+    /// workflow to be in `AwaitingUserInput` status. Clears `pending_message`,
+    /// resets the phase to `Active`, and sets the workflow back to `InProgress`.
+    pub fn resume_from_user_input(&mut self) -> WorkflowEngineResult<()> {
+        if self.status != WorkflowStatus::AwaitingUserInput {
+            return Err(WorkflowError::StateError(format!(
+                "cannot resume workflow {} — status is {:?}, not AwaitingUserInput",
+                self.workflow_id, self.status
+            )));
+        }
+
+        let phase = self
+            .current_phase_mut()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
+
+        if phase.status != PhaseStatus::AwaitingUserInput {
+            return Err(WorkflowError::StateError(format!(
+                "cannot resume phase {} — status is {:?}, not AwaitingUserInput",
+                phase.phase_id, phase.status
+            )));
+        }
+
+        phase.pending_message = None;
+        phase.status = PhaseStatus::Active;
+        self.status = WorkflowStatus::InProgress;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
 }
 
 /// Mutable runtime state for a running workflow engine instance.
@@ -780,6 +871,14 @@ mod tests {
             "awaiting_repair"
         );
         assert_eq!(format!("{}", WorkflowStatus::Completed), "completed");
+        assert_eq!(
+            format!("{}", WorkflowStatus::AwaitingUserInput),
+            "awaiting_user_input"
+        );
+        assert_eq!(
+            format!("{}", WorkflowStatus::UserTerminated),
+            "user_terminated"
+        );
     }
 
     #[test]
@@ -787,5 +886,80 @@ mod tests {
         assert_eq!(format!("{}", PhaseStatus::Pending), "pending");
         assert_eq!(format!("{}", PhaseStatus::Active), "active");
         assert_eq!(format!("{}", PhaseStatus::Completed), "completed");
+        assert_eq!(
+            format!("{}", PhaseStatus::AwaitingUserInput),
+            "awaiting_user_input"
+        );
+    }
+
+    #[test]
+    fn test_handoff_to_user_no_breakout_pauses_workflow() {
+        let template = impl_audit_default();
+        let mut wf = WorkflowInstance::new(
+            WorkflowId("test-123".to_string()),
+            template,
+            "/path/to/handoff.md",
+        );
+
+        wf.start_phase().expect("should start phase");
+        wf.handoff_to_user_phase("review this", false)
+            .expect("should handoff to user");
+
+        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::AwaitingUserInput);
+        assert_eq!(wf.status, WorkflowStatus::AwaitingUserInput);
+        assert_eq!(
+            wf.current_phase().unwrap().pending_message.as_deref(),
+            Some("review this")
+        );
+    }
+
+    #[test]
+    fn test_handoff_to_user_breakout_terminates_workflow() {
+        let template = impl_audit_default();
+        let mut wf = WorkflowInstance::new(
+            WorkflowId("test-123".to_string()),
+            template,
+            "/path/to/handoff.md",
+        );
+
+        wf.start_phase().expect("should start phase");
+        wf.handoff_to_user_phase("stopping", true)
+            .expect("should handoff to user");
+
+        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
+        assert_eq!(wf.status, WorkflowStatus::UserTerminated);
+    }
+
+    #[test]
+    fn test_resume_from_user_input_restores_active_state() {
+        let template = impl_audit_default();
+        let mut wf = WorkflowInstance::new(
+            WorkflowId("test-123".to_string()),
+            template,
+            "/path/to/handoff.md",
+        );
+
+        wf.start_phase().expect("should start phase");
+        wf.handoff_to_user_phase("review", false)
+            .expect("should handoff to user");
+        wf.resume_from_user_input()
+            .expect("should resume from user input");
+
+        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
+        assert_eq!(wf.status, WorkflowStatus::InProgress);
+        assert_eq!(wf.current_phase().unwrap().pending_message, None);
+    }
+
+    #[test]
+    fn test_resume_fails_when_not_paused() {
+        let template = impl_audit_default();
+        let mut wf = WorkflowInstance::new(
+            WorkflowId("test-123".to_string()),
+            template,
+            "/path/to/handoff.md",
+        );
+
+        let result = wf.resume_from_user_input();
+        assert!(result.is_err());
     }
 }

@@ -57,6 +57,13 @@ enum Commands {
         #[arg(value_name = "WORKFLOW_ID")]
         workflow_id: String,
     },
+
+    /// Resume a workflow paused at a HandoffToUser checkpoint
+    Resume {
+        /// Workflow ID to resume
+        #[arg(value_name = "WORKFLOW_ID")]
+        workflow_id: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -98,6 +105,12 @@ fn main() -> Result<()> {
             let store = open_store()?;
             hymenium::commands::reconcile::run(&workflow_id, &store)
                 .with_context(|| format!("reconcile failed for {workflow_id}"))?;
+        }
+
+        Commands::Resume { workflow_id } => {
+            let store = open_store()?;
+            hymenium::commands::resume::run(&workflow_id, &store)
+                .with_context(|| format!("resume failed for {workflow_id}"))?;
         }
     }
 

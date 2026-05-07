@@ -142,6 +142,7 @@ impl WorkflowStore {
                 retry_count    INTEGER NOT NULL DEFAULT 0,
                 phase_order    INTEGER NOT NULL,
                 failure_reason TEXT,
+                pending_message TEXT,
                 PRIMARY KEY (workflow_id, phase_id),
                 FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
             );
@@ -174,6 +175,8 @@ impl WorkflowStore {
             "current_phase_idx",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
+
+        self.ensure_column("phase_states", "pending_message", "TEXT")?;
 
         Ok(())
     }
@@ -382,7 +385,7 @@ impl WorkflowStore {
     pub fn list_active_workflows(&self) -> Result<Vec<WorkflowInstance>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT workflow_id FROM workflows
-             WHERE status NOT IN ('completed', 'failed', 'cancelled')
+             WHERE status NOT IN ('completed', 'failed', 'cancelled', 'user_terminated')
              ORDER BY created_at DESC",
         )?;
 
@@ -431,8 +434,8 @@ impl WorkflowStore {
         self.conn.execute(
             "INSERT INTO phase_states
                 (workflow_id, phase_id, role, status, agent_id, started_at,
-                 completed_at, canopy_task_id, retry_count, phase_order, failure_reason)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 completed_at, canopy_task_id, retry_count, phase_order, failure_reason, pending_message)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(workflow_id, phase_id) DO UPDATE SET
                 role = excluded.role,
                 status = excluded.status,
@@ -442,7 +445,8 @@ impl WorkflowStore {
                 canopy_task_id = excluded.canopy_task_id,
                 retry_count = excluded.retry_count,
                 phase_order = excluded.phase_order,
-                failure_reason = excluded.failure_reason",
+                failure_reason = excluded.failure_reason,
+                pending_message = excluded.pending_message",
             params![
                 workflow_id.0,
                 state.phase_id,
@@ -459,6 +463,7 @@ impl WorkflowStore {
                     reason: format!("value {} exceeds i64::MAX", order),
                 })?,
                 state.failure_reason,
+                state.pending_message.as_deref(),
             ],
         )?;
         Ok(())
@@ -567,7 +572,7 @@ impl WorkflowStore {
     fn load_phase_states(&self, workflow_id: &WorkflowId) -> Result<Vec<PhaseState>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT phase_id, role, status, agent_id, started_at, completed_at,
-                    canopy_task_id, retry_count, failure_reason
+                    canopy_task_id, retry_count, failure_reason, pending_message
              FROM phase_states
              WHERE workflow_id = ?1
              ORDER BY phase_order ASC",
@@ -585,6 +590,7 @@ impl WorkflowStore {
                     row.get::<_, Option<String>>(6)?, // canopy_task_id
                     row.get::<_, u32>(7)?,            // retry_count
                     row.get::<_, Option<String>>(8)?, // failure_reason
+                    row.get::<_, Option<String>>(9)?, // pending_message
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -600,6 +606,7 @@ impl WorkflowStore {
             canopy_id,
             retry_count,
             failure_reason,
+            pending_message,
         ) in rows
         {
             let role = parse_agent_role(&role_str)?;
@@ -620,6 +627,7 @@ impl WorkflowStore {
                 started_at,
                 completed_at,
                 failure_reason,
+                pending_message,
                 retry_count,
             });
         }
@@ -639,6 +647,8 @@ fn parse_workflow_status(s: &str) -> Result<WorkflowStatus, StoreError> {
         "in_progress" => Ok(WorkflowStatus::InProgress),
         "blocked_on_gate" => Ok(WorkflowStatus::BlockedOnGate),
         "awaiting_repair" => Ok(WorkflowStatus::AwaitingRepair),
+        "awaiting_user_input" => Ok(WorkflowStatus::AwaitingUserInput),
+        "user_terminated" => Ok(WorkflowStatus::UserTerminated),
         "completed" => Ok(WorkflowStatus::Completed),
         "failed" => Ok(WorkflowStatus::Failed),
         "cancelled" => Ok(WorkflowStatus::Cancelled),
@@ -654,6 +664,7 @@ fn parse_phase_status(s: &str) -> Result<PhaseStatus, StoreError> {
     match s {
         "pending" => Ok(PhaseStatus::Pending),
         "active" => Ok(PhaseStatus::Active),
+        "awaiting_user_input" => Ok(PhaseStatus::AwaitingUserInput),
         "completed" => Ok(PhaseStatus::Completed),
         "failed" => Ok(PhaseStatus::Failed),
         "skipped" => Ok(PhaseStatus::Skipped),
