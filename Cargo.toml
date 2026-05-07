@@ -1,6 +1,6 @@
 [package]
 name = "hymenium"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2021"
 rust-version = "1.85"
 authors = ["William Newton"]
@@ -17,7 +17,7 @@ clap = { version = "4", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-spore = { git = "https://github.com/basidiocarp/spore", rev = "0bc2e878010e75e30e26fa517d747e97d59628b0" }
+spore = { git = "https://github.com/basidiocarp/spore", tag = "v0.5.0" }
 thiserror = "2"
 rusqlite = { version = "0.39", features = ["bundled"] }
 tracing = "0.1"
