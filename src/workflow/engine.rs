@@ -113,6 +113,10 @@ pub struct PhaseState {
     /// Message surfaced to the operator when the phase enters AwaitingUserInput.
     pub pending_message: Option<String>,
     pub retry_count: u32,
+    /// Cumulative tool failure count for this phase execution.
+    pub tool_failure_count: u32,
+    /// Cumulative request count for this phase execution.
+    pub request_count: u32,
 }
 
 impl PhaseState {
@@ -129,6 +133,8 @@ impl PhaseState {
             failure_reason: None,
             pending_message: None,
             retry_count: 0,
+            tool_failure_count: 0,
+            request_count: 0,
         }
     }
 
@@ -425,6 +431,121 @@ impl WorkflowInstance {
         phase.retry_count = phase.retry_count.saturating_add(1);
         self.updated_at = Utc::now();
         Ok(())
+    }
+
+    /// Record a tool failure for the current phase.
+    ///
+    /// Increments `tool_failure_count` on the current phase and checks the
+    /// ceiling. If the ceiling is reached, marks the phase `Failed` with
+    /// `ExceededFailureCeiling` and sets the workflow to `Failed`.
+    /// Returns `true` when the ceiling was hit.
+    ///
+    /// Only valid when the current phase is `Active`.
+    pub fn record_tool_failure(&mut self, ceiling: u32) -> WorkflowEngineResult<bool> {
+        let phase_id = self
+            .current_phase()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?
+            .phase_id
+            .clone();
+
+        let phase_status = self.current_phase().unwrap().status.clone();
+
+        if phase_status != PhaseStatus::Active {
+            return Err(WorkflowError::StateError(format!(
+                "cannot record tool failure for phase {} in status {:?}",
+                phase_id, phase_status
+            )));
+        }
+
+        let phase = self.current_phase_mut().unwrap();
+        phase.tool_failure_count = phase.tool_failure_count.saturating_add(1);
+        let hit_ceiling = phase.tool_failure_count >= ceiling;
+
+        if hit_ceiling {
+            let reason = format!(
+                "ExceededFailureCeiling: {} tool failures reached ceiling of {}",
+                phase.tool_failure_count, ceiling
+            );
+            phase.failure_reason = Some(reason);
+            phase.mark_failed();
+        }
+
+        self.updated_at = Utc::now();
+
+        if hit_ceiling {
+            self.status = WorkflowStatus::Failed;
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    /// Record a request for the current phase.
+    ///
+    /// Increments `request_count` on the current phase and checks the ceiling.
+    /// If the ceiling is reached, marks the phase `Failed` with
+    /// `ExceededRequestCeiling` and sets the workflow to `Failed`.
+    /// Returns `true` when the ceiling was hit.
+    ///
+    /// Only valid when the current phase is `Active`.
+    pub fn record_request(&mut self, ceiling: u32) -> WorkflowEngineResult<bool> {
+        let phase_id = self
+            .current_phase()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?
+            .phase_id
+            .clone();
+
+        let phase_status = self.current_phase().unwrap().status.clone();
+
+        if phase_status != PhaseStatus::Active {
+            return Err(WorkflowError::StateError(format!(
+                "cannot record request for phase {} in status {:?}",
+                phase_id, phase_status
+            )));
+        }
+
+        let phase = self.current_phase_mut().unwrap();
+        phase.request_count = phase.request_count.saturating_add(1);
+        let hit_ceiling = phase.request_count >= ceiling;
+
+        if hit_ceiling {
+            let reason = format!(
+                "ExceededRequestCeiling: {} requests reached ceiling of {}",
+                phase.request_count, ceiling
+            );
+            phase.failure_reason = Some(reason);
+            phase.mark_failed();
+        }
+
+        self.updated_at = Utc::now();
+
+        if hit_ceiling {
+            self.status = WorkflowStatus::Failed;
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+
+    /// Resolve the effective tool failure ceiling for the current phase.
+    ///
+    /// Uses the per-phase override when set; otherwise inherits from the
+    /// workflow-level template default.
+    pub fn effective_tool_failure_ceiling(&self) -> u32 {
+        self.template
+            .phases
+            .get(self.current_phase_idx)
+            .and_then(|p| p.max_tool_failure_per_phase)
+            .unwrap_or(self.template.max_tool_failure_per_phase)
+    }
+
+    /// Resolve the effective request ceiling for the current phase.
+    pub fn effective_request_ceiling(&self) -> u32 {
+        self.template
+            .phases
+            .get(self.current_phase_idx)
+            .and_then(|p| p.max_requests_per_phase)
+            .unwrap_or(self.template.max_requests_per_phase)
     }
 
     /// Check if the current phase's exit gates are satisfied.
@@ -961,5 +1082,117 @@ mod tests {
 
         let result = wf.resume_from_user_input();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_record_tool_failure_below_ceiling_returns_false() {
+        let template = impl_audit_default();
+        let mut wf = WorkflowInstance::new(
+            WorkflowId("test-123".to_string()),
+            template,
+            "/path/to/handoff.md",
+        );
+
+        wf.start_phase().expect("should start phase");
+
+        let hit_ceiling = wf.record_tool_failure(3).expect("should record failure");
+        assert!(!hit_ceiling);
+        assert_eq!(wf.current_phase().unwrap().tool_failure_count, 1);
+        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
+
+        let hit_ceiling = wf.record_tool_failure(3).expect("should record second failure");
+        assert!(!hit_ceiling);
+        assert_eq!(wf.current_phase().unwrap().tool_failure_count, 2);
+        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
+    }
+
+    #[test]
+    fn test_record_tool_failure_at_ceiling_returns_true_and_fails_phase() {
+        let template = impl_audit_default();
+        let mut wf = WorkflowInstance::new(
+            WorkflowId("test-123".to_string()),
+            template,
+            "/path/to/handoff.md",
+        );
+
+        wf.start_phase().expect("should start phase");
+
+        let hit_ceiling = wf.record_tool_failure(2).expect("should record failure");
+        assert!(!hit_ceiling);
+        assert_eq!(wf.current_phase().unwrap().tool_failure_count, 1);
+
+        let hit_ceiling = wf.record_tool_failure(2).expect("should record second failure");
+        assert!(hit_ceiling);
+        assert_eq!(wf.current_phase().unwrap().tool_failure_count, 2);
+        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
+        assert_eq!(wf.status, WorkflowStatus::Failed);
+        assert!(wf
+            .current_phase()
+            .unwrap()
+            .failure_reason
+            .as_ref()
+            .unwrap()
+            .contains("ExceededFailureCeiling"));
+    }
+
+    #[test]
+    fn test_record_request_at_ceiling_returns_true_and_fails_phase() {
+        let template = impl_audit_default();
+        let mut wf = WorkflowInstance::new(
+            WorkflowId("test-124".to_string()),
+            template,
+            "/path/to/handoff.md",
+        );
+
+        wf.start_phase().expect("should start phase");
+
+        let hit_ceiling = wf.record_request(3).expect("should record request");
+        assert!(!hit_ceiling);
+        assert_eq!(wf.current_phase().unwrap().request_count, 1);
+
+        let hit_ceiling = wf.record_request(3).expect("should record second request");
+        assert!(!hit_ceiling);
+        assert_eq!(wf.current_phase().unwrap().request_count, 2);
+
+        let hit_ceiling = wf.record_request(3).expect("should record third request");
+        assert!(hit_ceiling);
+        assert_eq!(wf.current_phase().unwrap().request_count, 3);
+        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
+        assert_eq!(wf.status, WorkflowStatus::Failed);
+        assert!(wf
+            .current_phase()
+            .unwrap()
+            .failure_reason
+            .as_ref()
+            .unwrap()
+            .contains("ExceededRequestCeiling"));
+    }
+
+    #[test]
+    fn test_effective_ceiling_inherits_template_default() {
+        let template = impl_audit_default();
+        let wf = WorkflowInstance::new(
+            WorkflowId("test-125".to_string()),
+            template,
+            "/path/to/handoff.md",
+        );
+
+        assert_eq!(wf.effective_tool_failure_ceiling(), 10);
+        assert_eq!(wf.effective_request_ceiling(), 50);
+    }
+
+    #[test]
+    fn test_effective_ceiling_uses_per_phase_override() {
+        let mut template = impl_audit_default();
+        template.phases[0].max_tool_failure_per_phase = Some(3);
+
+        let wf = WorkflowInstance::new(
+            WorkflowId("test-126".to_string()),
+            template,
+            "/path/to/handoff.md",
+        );
+
+        assert_eq!(wf.effective_tool_failure_ceiling(), 3);
+        assert_eq!(wf.effective_request_ceiling(), 50);
     }
 }

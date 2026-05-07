@@ -34,6 +34,14 @@ pub enum TemplateError {
 /// Result type for template operations.
 pub type TemplateResult<T> = Result<T, TemplateError>;
 
+fn default_max_tool_failure() -> u32 {
+    10
+}
+
+fn default_max_requests() -> u32 {
+    50
+}
+
 /// Represents a complete workflow template with phases and transitions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowTemplate {
@@ -43,6 +51,14 @@ pub struct WorkflowTemplate {
     pub description: String,
     pub phases: Vec<Phase>,
     pub transitions: Vec<Transition>,
+    /// Default max tool failures per phase. Phases without a per-phase override inherit this.
+    /// Defaults to 10 when absent.
+    #[serde(default = "default_max_tool_failure")]
+    pub max_tool_failure_per_phase: u32,
+    /// Default max requests per phase. Phases without a per-phase override inherit this.
+    /// Defaults to 50 when absent.
+    #[serde(default = "default_max_requests")]
+    pub max_requests_per_phase: u32,
 }
 
 impl WorkflowTemplate {
@@ -127,6 +143,14 @@ pub struct Phase {
     /// When present, hymenium logs the rubric condition at phase boundary transitions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rubric: Option<PhaseRubric>,
+    /// Maximum tool failures allowed before the phase fails with ExceededFailureCeiling.
+    /// When None, inherits from the workflow-level default (which defaults to 10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tool_failure_per_phase: Option<u32>,
+    /// Maximum requests allowed before the phase stops.
+    /// When None, inherits from the workflow-level default (which defaults to 50).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_requests_per_phase: Option<u32>,
 }
 
 impl Phase {
@@ -303,6 +327,8 @@ pub fn impl_audit_default() -> WorkflowTemplate {
                     ],
                 },
                 rubric: None,
+                max_tool_failure_per_phase: None,
+                max_requests_per_phase: None,
             },
             Phase {
                 phase_id: "audit".to_string(),
@@ -319,6 +345,8 @@ pub fn impl_audit_default() -> WorkflowTemplate {
                     requires: vec!["audit_clean".to_string(), "findings_resolved".to_string()],
                 },
                 rubric: None,
+                max_tool_failure_per_phase: None,
+                max_requests_per_phase: None,
             },
         ],
         transitions: vec![Transition {
@@ -326,6 +354,8 @@ pub fn impl_audit_default() -> WorkflowTemplate {
             to_phase: "audit".to_string(),
             condition: "Implementation complete with verification evidence".to_string(),
         }],
+        max_tool_failure_per_phase: 10,
+        max_requests_per_phase: 50,
     }
 }
 
@@ -555,6 +585,8 @@ mod tests {
             entry_gate: Gate { requires: vec![] },
             exit_gate: Gate { requires: vec![] },
             rubric: None,
+            max_tool_failure_per_phase: None,
+            max_requests_per_phase: None,
         };
         assert_eq!(
             phase_no_agent_role.effective_agent_role(),
@@ -569,6 +601,8 @@ mod tests {
             entry_gate: Gate { requires: vec![] },
             exit_gate: Gate { requires: vec![] },
             rubric: None,
+            max_tool_failure_per_phase: None,
+            max_requests_per_phase: None,
         };
         assert_eq!(
             phase_auditor.effective_agent_role(),
@@ -583,6 +617,8 @@ mod tests {
             entry_gate: Gate { requires: vec![] },
             exit_gate: Gate { requires: vec![] },
             rubric: None,
+            max_tool_failure_per_phase: None,
+            max_requests_per_phase: None,
         };
         assert_eq!(
             phase_reviewer.effective_agent_role(),
@@ -597,6 +633,8 @@ mod tests {
             entry_gate: Gate { requires: vec![] },
             exit_gate: Gate { requires: vec![] },
             rubric: None,
+            max_tool_failure_per_phase: None,
+            max_requests_per_phase: None,
         };
         assert_eq!(
             phase_operator.effective_agent_role(),

@@ -143,6 +143,8 @@ impl WorkflowStore {
                 phase_order    INTEGER NOT NULL,
                 failure_reason TEXT,
                 pending_message TEXT,
+                tool_failure_count INTEGER NOT NULL DEFAULT 0,
+                request_count      INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (workflow_id, phase_id),
                 FOREIGN KEY (workflow_id) REFERENCES workflows(workflow_id) ON DELETE CASCADE
             );
@@ -177,6 +179,9 @@ impl WorkflowStore {
         )?;
 
         self.ensure_column("phase_states", "pending_message", "TEXT")?;
+
+        self.ensure_column("phase_states", "tool_failure_count", "INTEGER NOT NULL DEFAULT 0")?;
+        self.ensure_column("phase_states", "request_count", "INTEGER NOT NULL DEFAULT 0")?;
 
         Ok(())
     }
@@ -434,8 +439,9 @@ impl WorkflowStore {
         self.conn.execute(
             "INSERT INTO phase_states
                 (workflow_id, phase_id, role, status, agent_id, started_at,
-                 completed_at, canopy_task_id, retry_count, phase_order, failure_reason, pending_message)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 completed_at, canopy_task_id, retry_count, phase_order, failure_reason, pending_message,
+                 tool_failure_count, request_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(workflow_id, phase_id) DO UPDATE SET
                 role = excluded.role,
                 status = excluded.status,
@@ -446,7 +452,9 @@ impl WorkflowStore {
                 retry_count = excluded.retry_count,
                 phase_order = excluded.phase_order,
                 failure_reason = excluded.failure_reason,
-                pending_message = excluded.pending_message",
+                pending_message = excluded.pending_message,
+                tool_failure_count = excluded.tool_failure_count,
+                request_count = excluded.request_count",
             params![
                 workflow_id.0,
                 state.phase_id,
@@ -464,6 +472,8 @@ impl WorkflowStore {
                 })?,
                 state.failure_reason,
                 state.pending_message.as_deref(),
+                i64::from(state.tool_failure_count),
+                i64::from(state.request_count),
             ],
         )?;
         Ok(())
@@ -572,7 +582,8 @@ impl WorkflowStore {
     fn load_phase_states(&self, workflow_id: &WorkflowId) -> Result<Vec<PhaseState>, StoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT phase_id, role, status, agent_id, started_at, completed_at,
-                    canopy_task_id, retry_count, failure_reason, pending_message
+                    canopy_task_id, retry_count, failure_reason, pending_message,
+                    tool_failure_count, request_count
              FROM phase_states
              WHERE workflow_id = ?1
              ORDER BY phase_order ASC",
@@ -591,6 +602,8 @@ impl WorkflowStore {
                     row.get::<_, u32>(7)?,            // retry_count
                     row.get::<_, Option<String>>(8)?, // failure_reason
                     row.get::<_, Option<String>>(9)?, // pending_message
+                    row.get::<_, u32>(10)?,           // tool_failure_count
+                    row.get::<_, u32>(11)?,           // request_count
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -607,6 +620,8 @@ impl WorkflowStore {
             retry_count,
             failure_reason,
             pending_message,
+            tool_failure_count,
+            request_count,
         ) in rows
         {
             let role = parse_agent_role(&role_str)?;
@@ -629,6 +644,8 @@ impl WorkflowStore {
                 failure_reason,
                 pending_message,
                 retry_count,
+                tool_failure_count,
+                request_count,
             });
         }
 
@@ -1102,8 +1119,37 @@ mod tests {
         assert_eq!(loaded.current_phase_idx, 0);
     }
 
-    /// Regression: running `migrate()` twice does not fail. The `ensure_column`
-    /// check is idempotent — the second call detects the column already exists.
+    #[test]
+    fn test_loop_guard_counters_round_trip() {
+        use crate::workflow::engine::PhaseStatus;
+
+        let store = temp_store();
+        let mut inst = make_instance("01JNQWFLOOPGUARD000000001");
+        store.insert_workflow(&inst).expect("insert");
+
+        // Simulate a phase with non-zero counters.
+        inst.phase_states[0].status = PhaseStatus::Active;
+        inst.phase_states[0].tool_failure_count = 7;
+        inst.phase_states[0].request_count = 42;
+        store
+            .upsert_phase_state(&inst.workflow_id, &inst.phase_states[0], 0)
+            .expect("upsert phase with counters");
+
+        let loaded = store
+            .get_workflow(&inst.workflow_id)
+            .expect("get")
+            .expect("must exist");
+
+        assert_eq!(
+            loaded.phase_states[0].tool_failure_count, 7,
+            "tool_failure_count must round-trip"
+        );
+        assert_eq!(
+            loaded.phase_states[0].request_count, 42,
+            "request_count must round-trip"
+        );
+    }
+
     #[test]
     fn test_migrate_is_idempotent() {
         let store = temp_store();
