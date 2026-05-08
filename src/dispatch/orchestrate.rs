@@ -632,6 +632,8 @@ mod tests {
             description: "No phases".to_string(),
             phases: vec![],
             transitions: vec![],
+            max_tool_failure_per_phase: 10,
+            max_requests_per_phase: 50,
         };
         let handoff = test_handoff();
 

@@ -180,8 +180,16 @@ impl WorkflowStore {
 
         self.ensure_column("phase_states", "pending_message", "TEXT")?;
 
-        self.ensure_column("phase_states", "tool_failure_count", "INTEGER NOT NULL DEFAULT 0")?;
-        self.ensure_column("phase_states", "request_count", "INTEGER NOT NULL DEFAULT 0")?;
+        self.ensure_column(
+            "phase_states",
+            "tool_failure_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
+        self.ensure_column(
+            "phase_states",
+            "request_count",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
 
         Ok(())
     }

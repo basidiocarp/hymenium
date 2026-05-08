@@ -1026,7 +1026,10 @@ mod tests {
         wf.handoff_to_user_phase("review this", false)
             .expect("should handoff to user");
 
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::AwaitingUserInput);
+        assert_eq!(
+            wf.current_phase().unwrap().status,
+            PhaseStatus::AwaitingUserInput
+        );
         assert_eq!(wf.status, WorkflowStatus::AwaitingUserInput);
         assert_eq!(
             wf.current_phase().unwrap().pending_message.as_deref(),
@@ -1100,7 +1103,9 @@ mod tests {
         assert_eq!(wf.current_phase().unwrap().tool_failure_count, 1);
         assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
 
-        let hit_ceiling = wf.record_tool_failure(3).expect("should record second failure");
+        let hit_ceiling = wf
+            .record_tool_failure(3)
+            .expect("should record second failure");
         assert!(!hit_ceiling);
         assert_eq!(wf.current_phase().unwrap().tool_failure_count, 2);
         assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
@@ -1121,7 +1126,9 @@ mod tests {
         assert!(!hit_ceiling);
         assert_eq!(wf.current_phase().unwrap().tool_failure_count, 1);
 
-        let hit_ceiling = wf.record_tool_failure(2).expect("should record second failure");
+        let hit_ceiling = wf
+            .record_tool_failure(2)
+            .expect("should record second failure");
         assert!(hit_ceiling);
         assert_eq!(wf.current_phase().unwrap().tool_failure_count, 2);
         assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);

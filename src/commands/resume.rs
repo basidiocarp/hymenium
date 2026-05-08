@@ -1,8 +1,8 @@
 //! Resume a workflow paused at a HandoffToUser checkpoint.
 
-use anyhow::{Context, Result};
 use crate::store::WorkflowStore;
 use crate::workflow::WorkflowId;
+use anyhow::{Context, Result};
 
 /// Resume the workflow with `id` from a HandoffToUser pause.
 pub fn run(workflow_id: &str, store: &WorkflowStore) -> Result<()> {
