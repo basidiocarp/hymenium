@@ -143,7 +143,7 @@ pub struct Phase {
     /// When present, hymenium logs the rubric condition at phase boundary transitions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rubric: Option<PhaseRubric>,
-    /// Maximum tool failures allowed before the phase fails with ExceededFailureCeiling.
+    /// Maximum tool failures allowed before the phase fails with `ExceededFailureCeiling`.
     /// When None, inherits from the workflow-level default (which defaults to 10).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tool_failure_per_phase: Option<u32>,

@@ -46,9 +46,9 @@ pub enum WorkflowStatus {
     BlockedOnGate,
     /// Phase output failed verification and is queued for repair.
     AwaitingRepair,
-    /// Workflow paused at a HandoffToUser checkpoint, awaiting operator input.
+    /// Workflow paused at a `HandoffToUser` checkpoint, awaiting operator input.
     AwaitingUserInput,
-    /// Workflow terminated by operator via HandoffToUser breakout.
+    /// Workflow terminated by operator via `HandoffToUser` breakout.
     UserTerminated,
     Completed,
     Failed,
@@ -78,7 +78,7 @@ impl std::fmt::Display for WorkflowStatus {
 pub enum PhaseStatus {
     Pending,
     Active,
-    /// Phase paused awaiting operator input via HandoffToUser.
+    /// Phase paused awaiting operator input via `HandoffToUser`.
     AwaitingUserInput,
     Completed,
     Failed,
@@ -110,7 +110,7 @@ pub struct PhaseState {
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub failure_reason: Option<String>,
-    /// Message surfaced to the operator when the phase enters AwaitingUserInput.
+    /// Message surfaced to the operator when the phase enters `AwaitingUserInput`.
     pub pending_message: Option<String>,
     pub retry_count: u32,
     /// Cumulative tool failure count for this phase execution.
@@ -355,11 +355,7 @@ impl WorkflowInstance {
                 phase.failure_reason = Some(reason);
                 phase.mark_failed();
             }
-            PhaseStatus::Active => {
-                phase.failure_reason = Some(reason);
-                phase.mark_failed();
-            }
-            PhaseStatus::AwaitingUserInput => {
+            PhaseStatus::Active | PhaseStatus::AwaitingUserInput => {
                 phase.failure_reason = Some(reason);
                 phase.mark_failed();
             }
@@ -441,6 +437,10 @@ impl WorkflowInstance {
     /// Returns `true` when the ceiling was hit.
     ///
     /// Only valid when the current phase is `Active`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no current phase (programming error — call only on active workflows).
     pub fn record_tool_failure(&mut self, ceiling: u32) -> WorkflowEngineResult<bool> {
         let phase_id = self
             .current_phase()
@@ -488,6 +488,10 @@ impl WorkflowInstance {
     /// Returns `true` when the ceiling was hit.
     ///
     /// Only valid when the current phase is `Active`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if there is no current phase (programming error — call only on active workflows).
     pub fn record_request(&mut self, ceiling: u32) -> WorkflowEngineResult<bool> {
         let phase_id = self
             .current_phase()
@@ -710,7 +714,7 @@ impl WorkflowInstance {
         Some(completed - started)
     }
 
-    /// Pause the current phase at a HandoffToUser checkpoint.
+    /// Pause the current phase at a `HandoffToUser` checkpoint.
     ///
     /// If `breakout` is false: sets phase status to `AwaitingUserInput` and
     /// workflow status to `AwaitingUserInput`. The message is stored on the
@@ -750,7 +754,7 @@ impl WorkflowInstance {
         Ok(())
     }
 
-    /// Resume a workflow paused at a HandoffToUser checkpoint.
+    /// Resume a workflow paused at a `HandoffToUser` checkpoint.
     ///
     /// Requires the current phase to be in `AwaitingUserInput` status and the
     /// workflow to be in `AwaitingUserInput` status. Clears `pending_message`,

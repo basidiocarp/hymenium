@@ -58,7 +58,7 @@ enum Commands {
         workflow_id: String,
     },
 
-    /// Resume a workflow paused at a HandoffToUser checkpoint
+    /// Resume a workflow paused at a `HandoffToUser` checkpoint
     Resume {
         /// Workflow ID to resume
         #[arg(value_name = "WORKFLOW_ID")]
