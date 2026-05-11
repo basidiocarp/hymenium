@@ -232,17 +232,56 @@ impl WorkflowInstance {
 
     /// Start the current phase if it's pending.
     pub fn start_phase(&mut self) -> WorkflowEngineResult<()> {
-        let phase = self
-            .current_phase_mut()
-            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
+        let phase_id = self
+            .current_phase()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?
+            .phase_id
+            .clone();
 
-        if phase.status != PhaseStatus::Pending {
+        let phase_status = self
+            .current_phase()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?
+            .status
+            .clone();
+
+        if phase_status != PhaseStatus::Pending {
             return Err(WorkflowError::StateError(format!(
                 "cannot start phase {} in status {:?}",
-                phase.phase_id, phase.status
+                phase_id, phase_status
             )));
         }
 
+        // Check artifact prerequisites before starting the phase
+        let template_phase = self
+            .current_template_phase()
+            .ok_or_else(|| WorkflowError::StateError("template phase not found".to_string()))?
+            .clone();
+        // workspace_root: None — relative artifact paths resolve against the
+        // process cwd. Hymenium must be launched from the workspace root for
+        // relative paths to work correctly; absolute paths are unaffected.
+        let artifact_result = crate::workflow::template::check_artifact_prerequisites(
+            &template_phase,
+            None,
+        );
+        match artifact_result {
+            Ok(warnings) => {
+                for warning in &warnings {
+                    tracing::warn!("{}", warning);
+                }
+            }
+            Err(errors) => {
+                let error_msg = errors.join("; ");
+                self.blocked_on = Some(error_msg.clone());
+                return Err(WorkflowError::GateFailed {
+                    phase_id,
+                    reason: format!("artifact prerequisites not met: {}", error_msg),
+                });
+            }
+        }
+
+        let phase = self
+            .current_phase_mut()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
         phase.mark_active();
         self.status = WorkflowStatus::InProgress;
         self.updated_at = Utc::now();
@@ -625,11 +664,35 @@ impl WorkflowInstance {
             .phase_id
             .clone();
 
-        // Check entry gates of the next phase before advancing
+        // Prepare next phase index and template
         let next_idx = self.current_phase_idx + 1;
         let next_template_phase = self.template.phases.get(next_idx).ok_or_else(|| {
             WorkflowError::StateError("next template phase not found".to_string())
         })?;
+
+        // Check artifact prerequisites before evaluating gate conditions
+        // workspace_root: None — see start_phase() comment; process cwd must
+        // be the workspace root for relative artifact paths to resolve.
+        let artifact_result = crate::workflow::template::check_artifact_prerequisites(
+            next_template_phase,
+            None,
+        );
+        match artifact_result {
+            Ok(warnings) => {
+                for warning in &warnings {
+                    tracing::warn!("{}", warning);
+                }
+            }
+            Err(errors) => {
+                self.blocked_on = Some(errors.join("; "));
+                return Err(WorkflowError::GateFailed {
+                    phase_id: next_template_phase.phase_id.clone(),
+                    reason: format!("artifact prerequisites not met: {}", errors.join("; ")),
+                });
+            }
+        }
+
+        // Check entry gates of the next phase before advancing
         let entry_conditions: Vec<GateCondition> = next_template_phase
             .entry_gate
             .requires

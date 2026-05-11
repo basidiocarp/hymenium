@@ -42,6 +42,22 @@ fn default_max_requests() -> u32 {
     50
 }
 
+fn default_required() -> bool {
+    true
+}
+
+/// A prerequisite artifact that must exist before a phase can be dispatched.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ArtifactRequirement {
+    /// Path relative to the workspace root, or an absolute path.
+    pub path: String,
+    /// Human-readable description for error messages.
+    pub description: String,
+    /// If true, a missing artifact blocks dispatch. If false, warn only.
+    #[serde(default = "default_required")]
+    pub required: bool,
+}
+
 /// Represents a complete workflow template with phases and transitions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowTemplate {
@@ -151,6 +167,10 @@ pub struct Phase {
     /// When None, inherits from the workflow-level default (which defaults to 50).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_requests_per_phase: Option<u32>,
+    /// Artifact paths that must exist before this phase can be dispatched.
+    /// Required artifacts block dispatch; optional ones emit warnings only.
+    #[serde(default)]
+    pub required_artifacts: Vec<ArtifactRequirement>,
 }
 
 impl Phase {
@@ -165,6 +185,49 @@ impl Phase {
             ProcessRole::Reviewer => AgentRole::FinalVerifier,
             ProcessRole::Operator => AgentRole::WorkflowCoordinator,
         })
+    }
+}
+
+/// Check that all artifact prerequisites for a phase are satisfied.
+///
+/// Returns `Ok(warnings)` when all required artifacts exist (warnings lists
+/// paths of optional artifacts that were missing). Returns `Err(errors)` when
+/// one or more required artifacts are missing.
+pub fn check_artifact_prerequisites(
+    phase: &Phase,
+    workspace_root: Option<&std::path::Path>,
+) -> Result<Vec<String>, Vec<String>> {
+    let mut warnings = Vec::new();
+    let mut errors = Vec::new();
+
+    for artifact in &phase.required_artifacts {
+        let path = if std::path::Path::new(&artifact.path).is_absolute() {
+            std::path::PathBuf::from(&artifact.path)
+        } else if let Some(root) = workspace_root {
+            root.join(&artifact.path)
+        } else {
+            std::path::PathBuf::from(&artifact.path)
+        };
+
+        if !path.exists() {
+            let msg = format!(
+                "{} artifact missing: {} ({})",
+                if artifact.required { "Required" } else { "Optional" },
+                artifact.path,
+                artifact.description
+            );
+            if artifact.required {
+                errors.push(msg);
+            } else {
+                warnings.push(msg);
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(warnings)
+    } else {
+        Err(errors)
     }
 }
 
@@ -329,6 +392,7 @@ pub fn impl_audit_default() -> WorkflowTemplate {
                 rubric: None,
                 max_tool_failure_per_phase: None,
                 max_requests_per_phase: None,
+                required_artifacts: vec![],
             },
             Phase {
                 phase_id: "audit".to_string(),
@@ -347,6 +411,7 @@ pub fn impl_audit_default() -> WorkflowTemplate {
                 rubric: None,
                 max_tool_failure_per_phase: None,
                 max_requests_per_phase: None,
+                required_artifacts: vec![],
             },
         ],
         transitions: vec![Transition {
@@ -408,6 +473,9 @@ mod tests {
             template.phases[1].agent_role,
             Some(AgentRole::OutputVerifier)
         );
+        // Verify that phases without required_artifacts deserialize to an empty vec
+        assert!(template.phases[0].required_artifacts.is_empty());
+        assert!(template.phases[1].required_artifacts.is_empty());
     }
 
     #[test]
@@ -433,7 +501,8 @@ mod tests {
                     "role": "implementer",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
-                    "exit_gate": {"requires": []}
+                    "exit_gate": {"requires": []},
+                    "required_artifacts": []
                 }
             ],
             "transitions": [
@@ -466,14 +535,16 @@ mod tests {
                     "role": "implementer",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
-                    "exit_gate": {"requires": []}
+                    "exit_gate": {"requires": []},
+                    "required_artifacts": []
                 },
                 {
                     "phase_id": "phase1",
                     "role": "auditor",
                     "agent_tier": "sonnet",
                     "entry_gate": {"requires": []},
-                    "exit_gate": {"requires": []}
+                    "exit_gate": {"requires": []},
+                    "required_artifacts": []
                 }
             ],
             "transitions": []
@@ -514,6 +585,123 @@ mod tests {
 
         let result = registry.get("nonexistent");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_artifact_check_passes_when_all_present() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let file_path = tempdir.path().join("artifact.md");
+        std::fs::write(&file_path, "test").expect("write file");
+
+        let phase = Phase {
+            phase_id: "test".to_string(),
+            role: ProcessRole::Implementer,
+            agent_role: None,
+            agent_tier: AgentTier::Sonnet,
+            entry_gate: Gate { requires: vec![] },
+            exit_gate: Gate { requires: vec![] },
+            rubric: None,
+            max_tool_failure_per_phase: None,
+            max_requests_per_phase: None,
+            required_artifacts: vec![ArtifactRequirement {
+                path: "artifact.md".to_string(),
+                description: "test artifact".to_string(),
+                required: true,
+            }],
+        };
+
+        let result = check_artifact_prerequisites(&phase, Some(tempdir.path()));
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_artifact_check_blocks_on_missing_required() {
+        let phase = Phase {
+            phase_id: "test".to_string(),
+            role: ProcessRole::Implementer,
+            agent_role: None,
+            agent_tier: AgentTier::Sonnet,
+            entry_gate: Gate { requires: vec![] },
+            exit_gate: Gate { requires: vec![] },
+            rubric: None,
+            max_tool_failure_per_phase: None,
+            max_requests_per_phase: None,
+            required_artifacts: vec![ArtifactRequirement {
+                path: "/nonexistent/path/abc.md".to_string(),
+                description: "missing artifact".to_string(),
+                required: true,
+            }],
+        };
+
+        let result = check_artifact_prerequisites(&phase, None);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("Required artifact missing"));
+    }
+
+    #[test]
+    fn test_artifact_check_warns_on_missing_optional() {
+        let phase = Phase {
+            phase_id: "test".to_string(),
+            role: ProcessRole::Implementer,
+            agent_role: None,
+            agent_tier: AgentTier::Sonnet,
+            entry_gate: Gate { requires: vec![] },
+            exit_gate: Gate { requires: vec![] },
+            rubric: None,
+            max_tool_failure_per_phase: None,
+            max_requests_per_phase: None,
+            required_artifacts: vec![ArtifactRequirement {
+                path: "/nonexistent/path/abc.md".to_string(),
+                description: "optional artifact".to_string(),
+                required: false,
+            }],
+        };
+
+        let result = check_artifact_prerequisites(&phase, None);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("Optional artifact missing"));
+    }
+
+    #[test]
+    fn test_artifact_check_empty_prerequisites_always_passes() {
+        let phase = Phase {
+            phase_id: "test".to_string(),
+            role: ProcessRole::Implementer,
+            agent_role: None,
+            agent_tier: AgentTier::Sonnet,
+            entry_gate: Gate { requires: vec![] },
+            exit_gate: Gate { requires: vec![] },
+            rubric: None,
+            max_tool_failure_per_phase: None,
+            max_requests_per_phase: None,
+            required_artifacts: vec![],
+        };
+
+        let result = check_artifact_prerequisites(&phase, None);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_artifact_requirement_roundtrip() {
+        let requirement = ArtifactRequirement {
+            path: "src/main.rs".to_string(),
+            description: "main source file".to_string(),
+            required: true,
+        };
+
+        let json = serde_json::to_string(&requirement).expect("serialize");
+        let deserialized: ArtifactRequirement =
+            serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deserialized.path, requirement.path);
+        assert_eq!(deserialized.description, requirement.description);
+        assert_eq!(deserialized.required, requirement.required);
     }
 
     #[test]
@@ -587,6 +775,7 @@ mod tests {
             rubric: None,
             max_tool_failure_per_phase: None,
             max_requests_per_phase: None,
+            required_artifacts: vec![],
         };
         assert_eq!(
             phase_no_agent_role.effective_agent_role(),
@@ -603,6 +792,7 @@ mod tests {
             rubric: None,
             max_tool_failure_per_phase: None,
             max_requests_per_phase: None,
+            required_artifacts: vec![],
         };
         assert_eq!(
             phase_auditor.effective_agent_role(),
@@ -619,6 +809,7 @@ mod tests {
             rubric: None,
             max_tool_failure_per_phase: None,
             max_requests_per_phase: None,
+            required_artifacts: vec![],
         };
         assert_eq!(
             phase_reviewer.effective_agent_role(),
@@ -635,6 +826,7 @@ mod tests {
             rubric: None,
             max_tool_failure_per_phase: None,
             max_requests_per_phase: None,
+            required_artifacts: vec![],
         };
         assert_eq!(
             phase_operator.effective_agent_role(),
