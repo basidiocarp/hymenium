@@ -5,12 +5,12 @@
 //! idempotent and handles all terminal Canopy statuses.
 
 use hymenium::dispatch::{
-    reconcile_phases, CanopyClient, CompletenessReport, DispatchError, ImportResult,
-    PhaseReconcileOutcome, TaskDetail, TaskOptions,
+    CanopyClient, CompletenessReport, DispatchError, ImportResult, PhaseReconcileOutcome,
+    TaskDetail, TaskOptions, reconcile_phases,
 };
+use hymenium::workflow::WorkflowId;
 use hymenium::workflow::engine::{PhaseStatus, WorkflowInstance, WorkflowStatus};
 use hymenium::workflow::template::impl_audit_default;
-use hymenium::workflow::WorkflowId;
 use std::cell::RefCell;
 use std::collections::HashMap;
 

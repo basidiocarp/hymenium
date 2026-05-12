@@ -2,8 +2,8 @@
 
 use crate::outcomes::emit_terminal_outcome;
 use crate::store::{StoreError, WorkflowStore};
-use crate::workflow::engine::WorkflowStatus;
 use crate::workflow::WorkflowId;
+use crate::workflow::engine::WorkflowStatus;
 use thiserror::Error;
 
 /// Errors that can occur during the cancel command.
@@ -94,9 +94,9 @@ mod tests {
     use super::*;
     use crate::outcome::TerminalStatus;
     use crate::store::WorkflowStore;
+    use crate::workflow::WorkflowId;
     use crate::workflow::engine::{PhaseStatus, WorkflowInstance};
     use crate::workflow::template::impl_audit_default;
-    use crate::workflow::WorkflowId;
 
     fn temp_store() -> WorkflowStore {
         // Use a unique temp-file path per test invocation to avoid collisions.

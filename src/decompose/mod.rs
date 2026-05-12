@@ -477,12 +477,16 @@ mod tests {
             .position(|p| p.steps.iter().any(|s| s.number == 1))
             .unwrap();
 
-        assert!(result
-            .dependency_graph
-            .contains(&(step2_piece_idx, step1_piece_idx)));
-        assert!(result.pieces[step2_piece_idx]
-            .depends_on
-            .contains(&step1_piece_idx));
+        assert!(
+            result
+                .dependency_graph
+                .contains(&(step2_piece_idx, step1_piece_idx))
+        );
+        assert!(
+            result.pieces[step2_piece_idx]
+                .depends_on
+                .contains(&step1_piece_idx)
+        );
     }
 
     // --- Agent tier from effort ---

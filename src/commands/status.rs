@@ -1,8 +1,8 @@
 //! `hymenium status [<workflow_id>]` command handler.
 
 use crate::store::{StoreError, WorkflowStore};
-use crate::workflow::engine::WorkflowInstance;
 use crate::workflow::WorkflowId;
+use crate::workflow::engine::WorkflowInstance;
 use thiserror::Error;
 
 /// Errors that can occur during the status command.
@@ -135,9 +135,9 @@ fn workflow_summary_json(inst: &WorkflowInstance) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workflow::WorkflowId;
     use crate::workflow::engine::WorkflowInstance;
     use crate::workflow::template::impl_audit_default;
-    use crate::workflow::WorkflowId;
 
     /// Regression test: status JSON must emit septa workflow-status-v1 role names.
     ///

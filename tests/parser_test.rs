@@ -1,4 +1,4 @@
-use hymenium::parser::{parse_handoff, Dispatchability};
+use hymenium::parser::{Dispatchability, parse_handoff};
 
 #[test]
 fn test_crate_scaffold_handoff() {

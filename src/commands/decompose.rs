@@ -1,6 +1,6 @@
 //! `hymenium decompose <path>` command handler.
 
-use crate::decompose::{self, render_piece, DecompositionConfig};
+use crate::decompose::{self, DecompositionConfig, render_piece};
 use crate::parser::parse_handoff;
 use std::path::Path;
 use thiserror::Error;

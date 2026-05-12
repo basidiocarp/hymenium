@@ -178,7 +178,7 @@ impl Phase {
     ///
     /// Uses `agent_role` when explicitly set; falls back to a default derived
     /// from the process role.
-    #[must_use] 
+    #[must_use]
     pub fn effective_agent_role(&self) -> AgentRole {
         self.agent_role.clone().unwrap_or(match self.role {
             ProcessRole::Implementer => AgentRole::Worker,
@@ -213,7 +213,11 @@ pub fn check_artifact_prerequisites(
         if !path.exists() {
             let msg = format!(
                 "{} artifact missing: {} ({})",
-                if artifact.required { "Required" } else { "Optional" },
+                if artifact.required {
+                    "Required"
+                } else {
+                    "Optional"
+                },
                 artifact.path,
                 artifact.description
             );
@@ -320,7 +324,7 @@ pub struct TemplateRegistry {
 
 impl TemplateRegistry {
     /// Create a new empty template registry.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             templates: HashMap::new(),
@@ -366,7 +370,7 @@ pub fn load_from_json(json: &str) -> TemplateResult<WorkflowTemplate> {
 }
 
 /// Get the built-in implementer/auditor workflow template.
-#[must_use] 
+#[must_use]
 pub fn impl_audit_default() -> WorkflowTemplate {
     WorkflowTemplate {
         schema_version: "1.1".to_string(),
@@ -699,8 +703,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&requirement).expect("serialize");
-        let deserialized: ArtifactRequirement =
-            serde_json::from_str(&json).expect("deserialize");
+        let deserialized: ArtifactRequirement = serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(deserialized.path, requirement.path);
         assert_eq!(deserialized.description, requirement.description);

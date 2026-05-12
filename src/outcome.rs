@@ -24,9 +24,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::failure::FailureKind;
+use crate::workflow::WorkflowId;
 use crate::workflow::engine::{PhaseStatus, WorkflowInstance};
 use crate::workflow::template::AgentRole;
-use crate::workflow::WorkflowId;
 
 // ---------------------------------------------------------------------------
 // Wire types (septa workflow-outcome-v1)
@@ -104,7 +104,7 @@ impl FailureKind {
     /// Map an internal failure kind to the wire terminal failure type.
     ///
     /// See the module-level table in [`crate::outcome`] for rationale.
-    #[must_use] 
+    #[must_use]
     pub fn to_terminal_failure_type(self) -> TerminalFailureType {
         match self {
             FailureKind::SpecAmbiguity => TerminalFailureType::Unknown,
@@ -180,7 +180,7 @@ impl WorkflowOutcome {
     ///
     /// `attempt_count` is derived from the sum of `retry_count + 1` across all
     /// phase states (each dispatch is one attempt). Minimum is 1.
-    #[must_use] 
+    #[must_use]
     pub fn build(
         instance: &WorkflowInstance,
         failure: Option<&crate::failure::TypedFailure>,
@@ -268,9 +268,9 @@ impl WorkflowOutcome {
 mod tests {
     use super::*;
     use crate::failure::{FailureKind, TypedFailure};
+    use crate::workflow::WorkflowId;
     use crate::workflow::engine::{PhaseStatus, WorkflowInstance};
     use crate::workflow::template::impl_audit_default;
-    use crate::workflow::WorkflowId;
 
     fn make_instance(id: &str) -> WorkflowInstance {
         WorkflowInstance::new(

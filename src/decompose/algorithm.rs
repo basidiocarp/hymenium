@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::parser::ParsedStep;
 
-use super::{effort, DecompositionConfig};
+use super::{DecompositionConfig, effort};
 
 /// Group steps by their project field. Steps with no project go into "default".
 pub(super) fn group_by_project(
@@ -189,11 +189,7 @@ pub(super) fn total_effort_secs(steps: &[&ParsedStep], warnings: &mut Vec<String
         }
     }
 
-    if any_parsed {
-        Some(total)
-    } else {
-        None
-    }
+    if any_parsed { Some(total) } else { None }
 }
 
 /// Generate a human-readable title for a set of steps.

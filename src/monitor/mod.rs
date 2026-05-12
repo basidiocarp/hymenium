@@ -145,9 +145,9 @@ pub enum StallReason {
 pub(super) mod test_helpers {
     use super::*;
     use crate::dispatch::{CompletenessReport, DispatchError, TaskDetail};
+    use crate::workflow::WorkflowId;
     use crate::workflow::engine::PhaseStatus;
     use crate::workflow::template::impl_audit_default;
-    use crate::workflow::WorkflowId;
     use std::cell::RefCell;
 
     /// A focused test mock that lets each test control exactly what canopy

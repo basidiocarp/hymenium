@@ -1,11 +1,11 @@
 //! `hymenium dispatch <path>` command handler.
 
-use crate::dispatch::{dispatch_workflow, CapabilityCanopyClient, CliCanopyClient};
+use crate::dispatch::{CapabilityCanopyClient, CliCanopyClient, dispatch_workflow};
 use crate::parser::markdown::parse_handoff;
 use crate::store::{StoreError, WorkflowStore};
-use crate::workflow::engine::WorkflowInstance;
-use crate::workflow::template::{impl_audit_default, TemplateRegistry};
 use crate::workflow::WorkflowId;
+use crate::workflow::engine::WorkflowInstance;
+use crate::workflow::template::{TemplateRegistry, impl_audit_default};
 use std::path::Path;
 use thiserror::Error;
 use ulid::Ulid;
@@ -90,11 +90,11 @@ pub fn run(path: &Path, store: &WorkflowStore) -> Result<WorkflowInstance, Dispa
 
 #[cfg(test)]
 mod tests {
-    use crate::dispatch::{dispatch_workflow, MockCanopyClient};
+    use crate::dispatch::{MockCanopyClient, dispatch_workflow};
     use crate::parser::{ParsedHandoff, ParsedStep};
     use crate::store::WorkflowStore;
-    use crate::workflow::template::impl_audit_default;
     use crate::workflow::WorkflowId;
+    use crate::workflow::template::impl_audit_default;
 
     fn temp_store() -> WorkflowStore {
         // Use a unique file path per test invocation so tests don't collide.

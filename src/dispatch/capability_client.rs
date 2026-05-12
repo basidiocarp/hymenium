@@ -31,7 +31,7 @@ use super::{
 };
 #[cfg(unix)]
 use crate::dispatch::cli::libc_kill;
-use crate::dispatch::cli::{resolve_canopy_binary, CANOPY_ALLOWED_ENV, CANOPY_TIMEOUT};
+use crate::dispatch::cli::{CANOPY_ALLOWED_ENV, CANOPY_TIMEOUT, resolve_canopy_binary};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::Write as _;
@@ -259,7 +259,7 @@ pub const DISPATCH_CAPABILITY: &str = "workflow.dispatch.v1";
 /// Adapts the internal `CanopyClient::create_task` interface into the Septa
 /// `dispatch-request-v1` wire format.  Fields that have no direct mapping are
 /// given safe defaults.
-#[must_use] 
+#[must_use]
 pub fn build_dispatch_request(
     _title: &str,
     _description: &str,

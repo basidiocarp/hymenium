@@ -3,7 +3,7 @@
 //! Deserializes the shared fixture from disk, checks field invariants, and
 //! re-serializes to confirm the JSON round-trips without error.
 
-use hymenium::workflow::template::{load_from_json, AgentRole, ProcessRole};
+use hymenium::workflow::template::{AgentRole, ProcessRole, load_from_json};
 
 #[test]
 fn workflow_template_v1_round_trip() {

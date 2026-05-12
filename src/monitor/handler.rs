@@ -1,4 +1,4 @@
-use crate::retry::{decide_recovery, RecoveryAction, RetryPolicy};
+use crate::retry::{RecoveryAction, RetryPolicy, decide_recovery};
 use crate::store::WorkflowStore;
 use crate::workflow::engine::WorkflowInstance;
 
@@ -44,7 +44,9 @@ pub fn handle_signal(
             // Get the current agent tier from the template phase.
             let current_tier = workflow
                 .current_template_phase()
-                .map_or(&crate::workflow::template::AgentTier::Sonnet, |p| &p.agent_tier);
+                .map_or(&crate::workflow::template::AgentTier::Sonnet, |p| {
+                    &p.agent_tier
+                });
             let action = decide_recovery(signal, current_retry_count, policy, current_tier);
 
             // If the recovery action is Retry, increment the retry counter and persist it.
@@ -82,13 +84,13 @@ pub fn handle_signal(
 mod tests {
     use super::*;
     use crate::store::WorkflowStore;
+    use crate::workflow::WorkflowId;
     use crate::workflow::engine::PhaseStatus;
     use crate::workflow::template::impl_audit_default;
-    use crate::workflow::WorkflowId;
     use chrono::Utc;
 
-    use super::super::test_helpers::make_workflow;
     use super::super::StallReason;
+    use super::super::test_helpers::make_workflow;
 
     /// Create an in-memory test store for unit tests.
     fn test_store() -> WorkflowStore {

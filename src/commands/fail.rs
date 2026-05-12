@@ -2,8 +2,8 @@
 
 use crate::outcomes::emit_terminal_outcome;
 use crate::store::{StoreError, WorkflowStore};
-use crate::workflow::engine::{WorkflowError, WorkflowStatus};
 use crate::workflow::WorkflowId;
+use crate::workflow::engine::{WorkflowError, WorkflowStatus};
 use thiserror::Error;
 
 /// Errors that can occur during the fail command.
@@ -40,27 +40,21 @@ pub fn run(workflow_id: &str, reason: &str, store: &WorkflowStore) -> Result<(),
             let ts = store
                 .get_outcome(&id)?
                 .map_or_else(|| "unknown".to_string(), |o| o.completed_at.to_rfc3339());
-            println!(
-                "Workflow {workflow_id} already completed at {ts}. No change."
-            );
+            println!("Workflow {workflow_id} already completed at {ts}. No change.");
             return Ok(());
         }
         WorkflowStatus::Cancelled => {
             let ts = store
                 .get_outcome(&id)?
                 .map_or_else(|| "unknown".to_string(), |o| o.completed_at.to_rfc3339());
-            println!(
-                "Workflow {workflow_id} was cancelled at {ts}. Outcome preserved."
-            );
+            println!("Workflow {workflow_id} was cancelled at {ts}. Outcome preserved.");
             return Ok(());
         }
         WorkflowStatus::Failed => {
             let ts = store
                 .get_outcome(&id)?
                 .map_or_else(|| "unknown".to_string(), |o| o.completed_at.to_rfc3339());
-            println!(
-                "Workflow {workflow_id} failed at {ts}. Outcome preserved."
-            );
+            println!("Workflow {workflow_id} failed at {ts}. Outcome preserved.");
             return Ok(());
         }
         _ => {}
@@ -98,9 +92,7 @@ pub fn run(workflow_id: &str, reason: &str, store: &WorkflowStore) -> Result<(),
         Ok(())
     })?;
 
-    println!(
-        "Workflow {workflow_id} marked as failed with reason: {reason}"
-    );
+    println!("Workflow {workflow_id} marked as failed with reason: {reason}");
 
     Ok(())
 }
@@ -114,9 +106,9 @@ mod tests {
     use super::*;
     use crate::outcome::TerminalStatus;
     use crate::store::WorkflowStore;
+    use crate::workflow::WorkflowId;
     use crate::workflow::engine::{PhaseStatus, WorkflowInstance};
     use crate::workflow::template::impl_audit_default;
-    use crate::workflow::WorkflowId;
 
     fn temp_store() -> WorkflowStore {
         // Use a unique temp-file path per test invocation to avoid collisions.

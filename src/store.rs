@@ -8,11 +8,11 @@
 //! Override with the `HYMENIUM_DB` environment variable.
 
 use crate::outcome::WorkflowOutcome;
+use crate::workflow::WorkflowId;
 use crate::workflow::engine::{PhaseState, PhaseStatus, WorkflowInstance, WorkflowStatus};
 use crate::workflow::template::{AgentRole, WorkflowTemplate};
-use crate::workflow::WorkflowId;
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -326,9 +326,7 @@ impl WorkflowStore {
             usize::try_from(current_phase_idx_i64).map_err(|_| StoreError::InvalidValue {
                 field: "current_phase_idx",
                 value: current_phase_idx_i64.to_string(),
-                reason: format!(
-                    "value {current_phase_idx_i64} is negative or exceeds usize::MAX"
-                ),
+                reason: format!("value {current_phase_idx_i64} is negative or exceeds usize::MAX"),
             })?;
 
         let phase_states = self.load_phase_states(&WorkflowId(wf_id.clone()))?;

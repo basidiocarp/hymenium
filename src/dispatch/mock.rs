@@ -22,7 +22,7 @@ pub struct MockCanopyClient {
 
 impl MockCanopyClient {
     /// Create a new mock client with no tasks and a default "all complete" report.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             tasks: RefCell::new(HashMap::new()),

@@ -4,10 +4,10 @@
 //! Canopy reports completion. This is the entry point for the reconciliation
 //! path described in H4 (Hymenium: Canopy Phase Reconciliation).
 
-use crate::dispatch::{reconcile_phases, CanopyClient, CliCanopyClient, PhaseReconcileOutcome};
+use crate::dispatch::{CanopyClient, CliCanopyClient, PhaseReconcileOutcome, reconcile_phases};
 use crate::store::{StoreError, WorkflowStore};
-use crate::workflow::engine::WorkflowStatus;
 use crate::workflow::WorkflowId;
+use crate::workflow::engine::WorkflowStatus;
 use thiserror::Error;
 
 /// Errors that can occur during the reconcile command.
@@ -103,9 +103,9 @@ mod tests {
     use super::*;
     use crate::dispatch::{MockCanopyClient, TaskDetail, TaskOptions};
     use crate::store::WorkflowStore;
+    use crate::workflow::WorkflowId;
     use crate::workflow::engine::{PhaseStatus, WorkflowInstance, WorkflowStatus};
     use crate::workflow::template::impl_audit_default;
-    use crate::workflow::WorkflowId;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn tmp_store() -> WorkflowStore {

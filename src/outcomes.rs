@@ -65,9 +65,9 @@ mod tests {
     use crate::failure::FailureKind;
     use crate::outcome::TerminalStatus;
     use crate::store::WorkflowStore;
+    use crate::workflow::WorkflowId;
     use crate::workflow::engine::{WorkflowInstance, WorkflowStatus};
     use crate::workflow::template::impl_audit_default;
-    use crate::workflow::WorkflowId;
 
     fn in_memory_store() -> WorkflowStore {
         // Use a unique temp-file path per test to avoid cross-test contention.

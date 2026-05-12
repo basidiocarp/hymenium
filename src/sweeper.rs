@@ -17,11 +17,11 @@
 
 use crate::store::StoreError;
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::PathBuf;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
 use thiserror::Error;
@@ -81,7 +81,7 @@ pub enum RuntimeStatus {
 }
 
 impl RuntimeStatus {
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             RuntimeStatus::Online => "online",

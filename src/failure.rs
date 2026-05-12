@@ -66,7 +66,7 @@ pub enum FailureKind {
 
 impl FailureKind {
     /// Return a short human-readable label suitable for operator display.
-    #[must_use] 
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             FailureKind::SpecAmbiguity => "spec ambiguity",
@@ -102,7 +102,7 @@ pub struct TypedFailure {
 
 impl TypedFailure {
     /// Construct a failure with no additional detail.
-    #[must_use] 
+    #[must_use]
     pub fn new(kind: FailureKind) -> Self {
         Self { kind, detail: None }
     }

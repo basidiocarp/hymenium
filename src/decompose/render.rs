@@ -5,7 +5,7 @@ use crate::parser::HandoffMetadata;
 use super::HandoffPiece;
 
 /// Render a child piece as a standalone handoff markdown document.
-#[must_use] 
+#[must_use]
 pub fn render_piece(
     piece: &HandoffPiece,
     parent_title: &str,

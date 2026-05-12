@@ -5,9 +5,9 @@
 //! once the workflow template engine (#118e) is built.
 
 use crate::workflow::{
+    WorkflowId,
     gate::{GateCondition, GateContext, GateEvaluator},
     template::WorkflowTemplate,
-    WorkflowId,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -211,7 +211,7 @@ impl WorkflowInstance {
     }
 
     /// Get the current phase, if any.
-    #[must_use] 
+    #[must_use]
     pub fn current_phase(&self) -> Option<&PhaseState> {
         self.phase_states.get(self.current_phase_idx)
     }
@@ -227,7 +227,7 @@ impl WorkflowInstance {
     }
 
     /// Get the template phase definition for the current phase.
-    #[must_use] 
+    #[must_use]
     pub fn current_template_phase(&self) -> Option<&crate::workflow::template::Phase> {
         self.template.phases.get(self.current_phase_idx)
     }
@@ -260,10 +260,8 @@ impl WorkflowInstance {
         // workspace_root: None — relative artifact paths resolve against the
         // process cwd. Hymenium must be launched from the workspace root for
         // relative paths to work correctly; absolute paths are unaffected.
-        let artifact_result = crate::workflow::template::check_artifact_prerequisites(
-            &template_phase,
-            None,
-        );
+        let artifact_result =
+            crate::workflow::template::check_artifact_prerequisites(&template_phase, None);
         match artifact_result {
             Ok(warnings) => {
                 for warning in &warnings {
@@ -573,7 +571,7 @@ impl WorkflowInstance {
     ///
     /// Uses the per-phase override when set; otherwise inherits from the
     /// workflow-level template default.
-    #[must_use] 
+    #[must_use]
     pub fn effective_tool_failure_ceiling(&self) -> u32 {
         self.template
             .phases
@@ -583,7 +581,7 @@ impl WorkflowInstance {
     }
 
     /// Resolve the effective request ceiling for the current phase.
-    #[must_use] 
+    #[must_use]
     pub fn effective_request_ceiling(&self) -> u32 {
         self.template
             .phases
@@ -674,10 +672,8 @@ impl WorkflowInstance {
         // Check artifact prerequisites before evaluating gate conditions
         // workspace_root: None — see start_phase() comment; process cwd must
         // be the workspace root for relative artifact paths to resolve.
-        let artifact_result = crate::workflow::template::check_artifact_prerequisites(
-            next_template_phase,
-            None,
-        );
+        let artifact_result =
+            crate::workflow::template::check_artifact_prerequisites(next_template_phase, None);
         match artifact_result {
             Ok(warnings) => {
                 for warning in &warnings {
@@ -771,7 +767,7 @@ impl WorkflowInstance {
     }
 
     /// Get the duration of a completed phase.
-    #[must_use] 
+    #[must_use]
     pub fn phase_duration(&self, idx: usize) -> Option<chrono::Duration> {
         let phase = self.get_phase(idx)?;
         let started = phase.started_at?;
@@ -859,7 +855,7 @@ pub struct WorkflowRuntime {
 
 impl WorkflowRuntime {
     /// Create a new workflow runtime in initial state.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             state: "idle".to_string(),
@@ -1203,13 +1199,14 @@ mod tests {
         assert_eq!(wf.current_phase().unwrap().tool_failure_count, 2);
         assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
         assert_eq!(wf.status, WorkflowStatus::Failed);
-        assert!(wf
-            .current_phase()
-            .unwrap()
-            .failure_reason
-            .as_ref()
-            .unwrap()
-            .contains("ExceededFailureCeiling"));
+        assert!(
+            wf.current_phase()
+                .unwrap()
+                .failure_reason
+                .as_ref()
+                .unwrap()
+                .contains("ExceededFailureCeiling")
+        );
     }
 
     #[test]
@@ -1236,13 +1233,14 @@ mod tests {
         assert_eq!(wf.current_phase().unwrap().request_count, 3);
         assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
         assert_eq!(wf.status, WorkflowStatus::Failed);
-        assert!(wf
-            .current_phase()
-            .unwrap()
-            .failure_reason
-            .as_ref()
-            .unwrap()
-            .contains("ExceededRequestCeiling"));
+        assert!(
+            wf.current_phase()
+                .unwrap()
+                .failure_reason
+                .as_ref()
+                .unwrap()
+                .contains("ExceededRequestCeiling")
+        );
     }
 
     #[test]

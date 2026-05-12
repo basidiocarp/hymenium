@@ -66,7 +66,7 @@ pub enum RecoveryAction {
 /// Return the next higher agent tier.
 ///
 /// Haiku -> Sonnet -> Opus -> Opus (ceiling). Any -> Sonnet.
-#[must_use] 
+#[must_use]
 pub fn next_tier(current: &AgentTier) -> AgentTier {
     match current {
         AgentTier::Haiku | AgentTier::Any => AgentTier::Sonnet,
@@ -83,7 +83,7 @@ pub fn next_tier(current: &AgentTier) -> AgentTier {
 /// The caller is responsible for executing the returned action (e.g. closing
 /// the stalled agent, re-dispatching with new parameters, or notifying the
 /// operator).
-#[must_use] 
+#[must_use]
 pub fn decide_recovery(
     signal: &ProgressSignal,
     retry_count: u32,
@@ -150,7 +150,12 @@ pub fn decide_recovery(
         ProgressSignal::Stalled {
             reason: StallReason::NoPasteMarkerProgress,
             ..
-        } => decide_progressive_recovery(retry_count, policy, current_tier, "partial progress stalled"),
+        } => decide_progressive_recovery(
+            retry_count,
+            policy,
+            current_tier,
+            "partial progress stalled",
+        ),
 
         // Failed canopy task.
         ProgressSignal::Failed { .. } => {
@@ -225,7 +230,7 @@ fn decide_progressive_recovery(
 /// | `MissingDependency`    | Cancel (dependency gating must be resolved first)|
 /// | `ExecutionIncomplete`  | Retry within `max_retries`, then escalate        |
 /// | `MinorDefect`          | Retry once for a focused repair loop             |
-#[must_use] 
+#[must_use]
 pub fn decide_recovery_typed(
     failure: &TypedFailure,
     retry_count: u32,
@@ -689,10 +694,10 @@ mod tests {
     #[test]
     fn status_chatter_via_handle_signal_returns_retry() {
         use crate::store::WorkflowStore;
+        use crate::workflow::WorkflowId;
         use crate::workflow::engine::PhaseStatus;
         use crate::workflow::engine::WorkflowInstance;
         use crate::workflow::template::impl_audit_default;
-        use crate::workflow::WorkflowId;
 
         let template = impl_audit_default();
         let mut wf = WorkflowInstance::new(

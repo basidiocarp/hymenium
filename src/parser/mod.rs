@@ -39,9 +39,7 @@ fn format_missing_section_error(section: &str, aliases: &[String]) -> String {
         quoted.join(", ")
     };
 
-    format!(
-        "missing required section '{section}' — accepted headings: {aliases_str}"
-    )
+    format!("missing required section '{section}' — accepted headings: {aliases_str}")
 }
 
 /// Dispatch type for a handoff.

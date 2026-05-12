@@ -119,7 +119,7 @@ pub fn check_progress(
 }
 
 /// Returns `true` when the signal indicates a stalled phase.
-#[must_use] 
+#[must_use]
 pub fn is_stalled(signal: &ProgressSignal) -> bool {
     matches!(signal, ProgressSignal::Stalled { .. })
 }
@@ -131,13 +131,13 @@ pub fn is_stalled(signal: &ProgressSignal) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workflow::WorkflowId;
     use crate::workflow::engine::PhaseStatus;
     use crate::workflow::template::impl_audit_default;
-    use crate::workflow::WorkflowId;
     use chrono::Utc;
 
     use super::super::test_helpers::{
-        complete_report, incomplete_report, make_workflow, task_with_status, TestCanopyClient,
+        TestCanopyClient, complete_report, incomplete_report, make_workflow, task_with_status,
     };
 
     // -- check_progress tests -------------------------------------------------

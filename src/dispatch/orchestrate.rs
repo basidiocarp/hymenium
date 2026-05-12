@@ -3,14 +3,14 @@ use super::task_packet::{CapabilityRequirements, TaskPacket};
 use super::{CanopyClient, DispatchError, TaskOptions};
 use crate::classify::classify_error;
 use crate::context::{
-    estimate_text_tokens, BudgetContextEngine, CompressionParams, ContextEngine, ContextMessage,
-    ContextMessageRole,
+    BudgetContextEngine, CompressionParams, ContextEngine, ContextMessage, ContextMessageRole,
+    estimate_text_tokens,
 };
 use crate::parser::ParsedHandoff;
+use crate::workflow::WorkflowId;
 use crate::workflow::engine::WorkflowInstance;
 use crate::workflow::template::AgentRole;
 use crate::workflow::template::WorkflowTemplate;
-use crate::workflow::WorkflowId;
 use tracing;
 
 const DISPATCH_CONTEXT_TOKEN_BUDGET: usize = 64;
@@ -388,7 +388,7 @@ fn build_acceptance_criteria(handoff: &ParsedHandoff) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Generate an agent name following the `<role>/<repo>/<handoff-slug>/<run>` convention.
-#[must_use] 
+#[must_use]
 pub fn agent_name(role: &AgentRole, repo: &str, handoff_slug: &str, run: u32) -> String {
     format!("{role}/{repo}/{handoff_slug}/{run}")
 }
@@ -398,7 +398,7 @@ pub fn agent_name(role: &AgentRole, repo: &str, handoff_slug: &str, run: u32) ->
 /// Lowercases the input, replaces whitespace and non-alphanumeric characters
 /// (except hyphens) with hyphens, collapses runs of hyphens, and trims
 /// leading/trailing hyphens.
-#[must_use] 
+#[must_use]
 pub fn handoff_slug(title: &str) -> String {
     let slug: String = title
         .to_lowercase()

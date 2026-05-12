@@ -45,7 +45,7 @@ impl std::fmt::Display for GateCondition {
 }
 
 /// Parse a string condition into a typed `GateCondition`.
-#[must_use] 
+#[must_use]
 pub fn parse_gate_condition(s: &str) -> GateCondition {
     match s {
         "code_diff_exists" => GateCondition::CodeDiffExists,
@@ -101,13 +101,13 @@ pub struct GateEvaluation {
 
 impl GateEvaluation {
     /// Check if all conditions in this gate passed.
-    #[must_use] 
+    #[must_use]
     pub fn passed(&self) -> bool {
         self.all_passed && self.conditions.iter().all(|c| c.passed)
     }
 
     /// Get a summary of which conditions failed, if any.
-    #[must_use] 
+    #[must_use]
     pub fn failures(&self) -> Vec<String> {
         self.conditions
             .iter()
@@ -206,7 +206,7 @@ pub struct MockGateEvaluator {
 
 impl MockGateEvaluator {
     /// Create a new mock evaluator with all conditions failing by default.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self {
             passing: HashMap::new(),
@@ -264,7 +264,7 @@ pub struct EvidenceGateEvaluator {
 }
 
 impl EvidenceGateEvaluator {
-    #[must_use] 
+    #[must_use]
     pub fn new(task: crate::dispatch::TaskDetail) -> Self {
         Self { task }
     }
