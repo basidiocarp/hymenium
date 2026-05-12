@@ -136,7 +136,8 @@ fn env_vars_are_stripped_from_child_process() {
     // Inject a secret into the current process's environment.
     let secret_key = "HYMENIUM_TEST_SECRET_12345";
     let secret_val = "super-secret-value-must-not-leak";
-    std::env::set_var(secret_key, secret_val);
+    // SAFETY: single-threaded test; no other thread reads this variable.
+    unsafe { std::env::set_var(secret_key, secret_val) };
 
     // Collect only the allowed env vars (mirroring what CliCanopyClient does).
     let allowed = &["PATH", "HOME", "LANG", "TMPDIR"];
@@ -164,7 +165,8 @@ fn env_vars_are_stripped_from_child_process() {
     );
 
     // Clean up the injected secret.
-    std::env::remove_var(secret_key);
+    // SAFETY: single-threaded test; no other thread reads this variable.
+    unsafe { std::env::remove_var(secret_key) };
 }
 
 // ---------------------------------------------------------------------------
@@ -199,13 +201,15 @@ fn client_with_absolute_bin_does_not_use_path_impostor() {
     // Prepend the impostor directory to PATH so it comes first.
     let orig_path = std::env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{}", impostor_dir.path().display(), orig_path);
-    std::env::set_var("PATH", &new_path);
+    // SAFETY: single-threaded test; no other thread reads PATH concurrently.
+    unsafe { std::env::set_var("PATH", &new_path) };
 
     // Passing the absolute path must bypass PATH entirely.
     let result = hymenium::dispatch::cli::resolve_canopy_binary(real_bin_str);
 
     // Restore PATH before any assertion that might panic.
-    std::env::set_var("PATH", &orig_path);
+    // SAFETY: single-threaded test; same invariant as above.
+    unsafe { std::env::set_var("PATH", &orig_path) };
 
     // The absolute path must be returned directly without touching PATH.
     assert!(

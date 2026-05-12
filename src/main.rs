@@ -34,11 +34,15 @@ enum Commands {
         json: bool,
     },
 
-    /// Decompose a large handoff into child tasks
+    /// Decompose a large handoff into focused child handoffs
     Decompose {
         /// Path to the handoff document
         #[arg(value_name = "PATH")]
         path: PathBuf,
+
+        /// Print what would be written without creating files
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Cancel a running workflow
@@ -91,8 +95,9 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Decompose { path } => {
-            println!("not yet implemented: decompose {}", path.display());
+        Commands::Decompose { path, dry_run } => {
+            hymenium::commands::decompose::run(&path, dry_run)
+                .with_context(|| format!("decompose failed for {}", path.display()))?;
         }
 
         Commands::Cancel { workflow_id } => {
