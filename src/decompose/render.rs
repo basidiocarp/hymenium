@@ -5,6 +5,7 @@ use crate::parser::HandoffMetadata;
 use super::HandoffPiece;
 
 /// Render a child piece as a standalone handoff markdown document.
+#[must_use] 
 pub fn render_piece(
     piece: &HandoffPiece,
     parent_title: &str,
@@ -32,7 +33,7 @@ pub fn render_piece(
         if !write_scope.is_empty() {
             out.push_str("allowed_write_scope:\n");
             for path in &write_scope {
-                out.push_str(&format!("  - {}\n", path));
+                out.push_str(&format!("  - {path}\n"));
             }
         }
 
@@ -46,8 +47,7 @@ pub fn render_piece(
     // Problem section
     out.push_str("## Problem\n\n");
     out.push_str(&format!(
-        "Child piece of parent handoff \"{}\".\n\n",
-        parent_title
+        "Child piece of parent handoff \"{parent_title}\".\n\n"
     ));
 
     // Steps
@@ -95,8 +95,7 @@ pub fn render_piece(
     // Context
     out.push_str("## Context\n\n");
     out.push_str(&format!(
-        "This piece was decomposed from: **{}**\n",
-        parent_title
+        "This piece was decomposed from: **{parent_title}**\n"
     ));
     if !piece.depends_on.is_empty() {
         out.push_str(&format!(

@@ -178,6 +178,7 @@ impl Phase {
     ///
     /// Uses `agent_role` when explicitly set; falls back to a default derived
     /// from the process role.
+    #[must_use] 
     pub fn effective_agent_role(&self) -> AgentRole {
         self.agent_role.clone().unwrap_or(match self.role {
             ProcessRole::Implementer => AgentRole::Worker,
@@ -319,6 +320,7 @@ pub struct TemplateRegistry {
 
 impl TemplateRegistry {
     /// Create a new empty template registry.
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             templates: HashMap::new(),
@@ -364,6 +366,7 @@ pub fn load_from_json(json: &str) -> TemplateResult<WorkflowTemplate> {
 }
 
 /// Get the built-in implementer/auditor workflow template.
+#[must_use] 
 pub fn impl_audit_default() -> WorkflowTemplate {
     WorkflowTemplate {
         schema_version: "1.1".to_string(),

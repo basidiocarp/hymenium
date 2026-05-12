@@ -195,7 +195,7 @@ fn client_with_absolute_bin_does_not_use_path_impostor() {
     write_script(
         &impostor_dir,
         "real-canopy",
-        &format!("touch '{}'\n", marker_str),
+        &format!("touch '{marker_str}'\n"),
     );
 
     // Prepend the impostor directory to PATH so it comes first.

@@ -55,7 +55,7 @@ pub fn run_list(store: &WorkflowStore, json: bool) -> Result<(), StatusCommandEr
         let entries: Vec<_> = instances.iter().map(workflow_summary_json).collect();
         let out = serde_json::to_string_pretty(&entries)
             .expect("serde_json::Value serialization is infallible");
-        println!("{}", out);
+        println!("{out}");
     } else {
         for inst in &instances {
             let phase_name = inst.current_phase().map_or("-", |p| p.phase_id.as_str());
@@ -79,7 +79,7 @@ fn print_human(inst: &WorkflowInstance) {
     println!("  Handoff:    {}", inst.handoff_path);
     println!("  Status:     {}", inst.status);
     if let Some(blocked) = &inst.blocked_on {
-        println!("  Blocked on: {}", blocked);
+        println!("  Blocked on: {blocked}");
     }
     println!("  Created:    {}", inst.created_at.to_rfc3339());
     println!("  Updated:    {}", inst.updated_at.to_rfc3339());
@@ -98,7 +98,7 @@ fn print_json(inst: &WorkflowInstance) {
     let val = workflow_summary_json(inst);
     let out =
         serde_json::to_string_pretty(&val).expect("serde_json::Value serialization is infallible");
-    println!("{}", out);
+    println!("{out}");
 }
 
 fn workflow_summary_json(inst: &WorkflowInstance) -> serde_json::Value {
@@ -177,9 +177,8 @@ mod tests {
             let role = phase["role"].as_str().expect("role must be a string");
             assert!(
                 allowed_roles.contains(&role),
-                "role '{}' is not in the septa workflow-status-v1 allowed set; \
-                 legacy names like 'implementer' and 'auditor' are forbidden",
-                role
+                "role '{role}' is not in the septa workflow-status-v1 allowed set; \
+                 legacy names like 'implementer' and 'auditor' are forbidden"
             );
         }
 

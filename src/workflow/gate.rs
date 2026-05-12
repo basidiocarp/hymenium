@@ -39,12 +39,13 @@ impl std::fmt::Display for GateCondition {
             GateCondition::VerificationPassed => write!(f, "verification_passed"),
             GateCondition::AuditClean => write!(f, "audit_clean"),
             GateCondition::FindingsResolved => write!(f, "findings_resolved"),
-            GateCondition::Custom(s) => write!(f, "{}", s),
+            GateCondition::Custom(s) => write!(f, "{s}"),
         }
     }
 }
 
 /// Parse a string condition into a typed `GateCondition`.
+#[must_use] 
 pub fn parse_gate_condition(s: &str) -> GateCondition {
     match s {
         "code_diff_exists" => GateCondition::CodeDiffExists,
@@ -100,11 +101,13 @@ pub struct GateEvaluation {
 
 impl GateEvaluation {
     /// Check if all conditions in this gate passed.
+    #[must_use] 
     pub fn passed(&self) -> bool {
         self.all_passed && self.conditions.iter().all(|c| c.passed)
     }
 
     /// Get a summary of which conditions failed, if any.
+    #[must_use] 
     pub fn failures(&self) -> Vec<String> {
         self.conditions
             .iter()
@@ -203,6 +206,7 @@ pub struct MockGateEvaluator {
 
 impl MockGateEvaluator {
     /// Create a new mock evaluator with all conditions failing by default.
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             passing: HashMap::new(),
@@ -241,9 +245,9 @@ impl GateEvaluator for MockGateEvaluator {
             condition: condition.clone(),
             passed,
             reason: if passed {
-                format!("{} satisfied", condition_str)
+                format!("{condition_str} satisfied")
             } else {
-                format!("{} not satisfied", condition_str)
+                format!("{condition_str} not satisfied")
             },
         })
     }
@@ -260,6 +264,7 @@ pub struct EvidenceGateEvaluator {
 }
 
 impl EvidenceGateEvaluator {
+    #[must_use] 
     pub fn new(task: crate::dispatch::TaskDetail) -> Self {
         Self { task }
     }

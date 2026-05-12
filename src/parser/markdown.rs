@@ -350,7 +350,7 @@ fn extract_list_section_by_type(
                     if value.is_empty() {
                         result.push(key);
                     } else {
-                        result.push(format!("{}: {}", key, value));
+                        result.push(format!("{key}: {value}"));
                     }
                 }
                 // Try ":**" format (e.g., "- **Dispatch:** `direct`")
@@ -360,7 +360,7 @@ fn extract_list_section_by_type(
                     if value.is_empty() {
                         result.push(key);
                     } else {
-                        result.push(format!("{}: {}", key, value));
+                        result.push(format!("{key}: {value}"));
                     }
                 }
             }

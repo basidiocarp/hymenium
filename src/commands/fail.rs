@@ -41,8 +41,7 @@ pub fn run(workflow_id: &str, reason: &str, store: &WorkflowStore) -> Result<(),
                 .get_outcome(&id)?
                 .map_or_else(|| "unknown".to_string(), |o| o.completed_at.to_rfc3339());
             println!(
-                "Workflow {} already completed at {}. No change.",
-                workflow_id, ts
+                "Workflow {workflow_id} already completed at {ts}. No change."
             );
             return Ok(());
         }
@@ -51,8 +50,7 @@ pub fn run(workflow_id: &str, reason: &str, store: &WorkflowStore) -> Result<(),
                 .get_outcome(&id)?
                 .map_or_else(|| "unknown".to_string(), |o| o.completed_at.to_rfc3339());
             println!(
-                "Workflow {} was cancelled at {}. Outcome preserved.",
-                workflow_id, ts
+                "Workflow {workflow_id} was cancelled at {ts}. Outcome preserved."
             );
             return Ok(());
         }
@@ -61,8 +59,7 @@ pub fn run(workflow_id: &str, reason: &str, store: &WorkflowStore) -> Result<(),
                 .get_outcome(&id)?
                 .map_or_else(|| "unknown".to_string(), |o| o.completed_at.to_rfc3339());
             println!(
-                "Workflow {} failed at {}. Outcome preserved.",
-                workflow_id, ts
+                "Workflow {workflow_id} failed at {ts}. Outcome preserved."
             );
             return Ok(());
         }
@@ -102,8 +99,7 @@ pub fn run(workflow_id: &str, reason: &str, store: &WorkflowStore) -> Result<(),
     })?;
 
     println!(
-        "Workflow {} marked as failed with reason: {}",
-        workflow_id, reason
+        "Workflow {workflow_id} marked as failed with reason: {reason}"
     );
 
     Ok(())

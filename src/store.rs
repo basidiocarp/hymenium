@@ -327,8 +327,7 @@ impl WorkflowStore {
                 field: "current_phase_idx",
                 value: current_phase_idx_i64.to_string(),
                 reason: format!(
-                    "value {} is negative or exceeds usize::MAX",
-                    current_phase_idx_i64
+                    "value {current_phase_idx_i64} is negative or exceeds usize::MAX"
                 ),
             })?;
 
@@ -381,7 +380,7 @@ impl WorkflowStore {
             i64::try_from(current_phase_idx).map_err(|_| StoreError::InvalidValue {
                 field: "current_phase_idx",
                 value: current_phase_idx.to_string(),
-                reason: format!("value {} exceeds i64::MAX", current_phase_idx),
+                reason: format!("value {current_phase_idx} exceeds i64::MAX"),
             })?;
         let updated = self.conn.execute(
             "UPDATE workflows SET current_phase_idx = ?1, updated_at = ?2
@@ -476,7 +475,7 @@ impl WorkflowStore {
                 i64::try_from(order).map_err(|_| StoreError::InvalidValue {
                     field: "phase_order",
                     value: order.to_string(),
-                    reason: format!("value {} exceeds i64::MAX", order),
+                    reason: format!("value {order} exceeds i64::MAX"),
                 })?,
                 state.failure_reason,
                 state.pending_message.as_deref(),

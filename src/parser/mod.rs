@@ -35,13 +35,12 @@ fn format_missing_section_error(section: &str, aliases: &[String]) -> String {
     } else if aliases.len() == 1 {
         format!("'{}'", aliases[0])
     } else {
-        let quoted: Vec<String> = aliases.iter().map(|a| format!("'{}'", a)).collect();
+        let quoted: Vec<String> = aliases.iter().map(|a| format!("'{a}'")).collect();
         quoted.join(", ")
     };
 
     format!(
-        "missing required section '{}' — accepted headings: {}",
-        section, aliases_str
+        "missing required section '{section}' — accepted headings: {aliases_str}"
     )
 }
 

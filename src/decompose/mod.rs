@@ -241,7 +241,7 @@ mod tests {
             project: None,
             effort: None,
             depends_on: Vec::new(),
-            description: format!("Description for step {}", number),
+            description: format!("Description for step {number}"),
             files_to_modify: Vec::new(),
             verification: None,
             checklist: Vec::new(),
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn split_at_step_count_boundary() {
         let steps: Vec<ParsedStep> = (1..=7)
-            .map(|i| make_step(i, &format!("Step {}", i)))
+            .map(|i| make_step(i, &format!("Step {i}")))
             .collect();
         let handoff = make_handoff("Big Task", steps);
         let config = DecompositionConfig {
@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn fallback_to_step_count_when_no_effort() {
         let steps: Vec<ParsedStep> = (1..=5)
-            .map(|i| make_step(i, &format!("Step {}", i)))
+            .map(|i| make_step(i, &format!("Step {i}")))
             .collect();
         let handoff = make_handoff("No Effort", steps);
         let config = DecompositionConfig {

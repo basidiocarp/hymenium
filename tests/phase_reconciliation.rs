@@ -150,8 +150,7 @@ fn phase_reconciliation_marks_active_phase_completed_when_canopy_task_is_complet
             outcome,
             PhaseReconcileOutcome::MarkedCompleted { advanced: true, .. }
         ),
-        "expected MarkedCompleted with advanced=true, got: {:?}",
-        outcome
+        "expected MarkedCompleted with advanced=true, got: {outcome:?}"
     );
 }
 

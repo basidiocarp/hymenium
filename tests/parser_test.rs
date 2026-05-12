@@ -321,7 +321,7 @@ fn test_missing_section_error_lists_aliases() {
     assert!(result.is_err());
 
     let err = result.unwrap_err();
-    let error_str = format!("{}", err);
+    let error_str = format!("{err}");
     // Error message should contain multiple accepted headings for Problem section
     assert!(
         error_str.contains("Problem"),

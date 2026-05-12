@@ -41,8 +41,7 @@ pub fn resolve_canopy_binary(name: &str) -> Result<PathBuf, DispatchError> {
             return Ok(p.to_path_buf());
         }
         return Err(DispatchError::CanopyError(format!(
-            "canopy binary not found at explicit path: {}",
-            name
+            "canopy binary not found at explicit path: {name}"
         )));
     }
 

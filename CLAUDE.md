@@ -142,10 +142,14 @@ pub trait WorkflowEngine {
 |----------|--------|----------|--------|
 | `workflow-status-v1` | Cap / Annulus | MCP tool or CLI | `septa/workflow-status-v1.schema.json` |
 | `dispatch-request-v1` | Canopy | MCP tool `canopy_task_create` and `canopy_task_assign` | `septa/dispatch-request-v1.schema.json` |
+| `task-packet-v1` | Internal dispatch | In-process during `dispatch_handoff()` | `septa/task-packet-v1.schema.json` |
+| `workflow-outcome-v1` | Canopy | CLI `canopy outcome record` | `septa/workflow-outcome-v1.schema.json` |
 
 **Source files:**
 - `src/dispatch/mod.rs` — `dispatch_handoff()` — builds and sends `dispatch-request-v1` to Canopy via MCP
+- `src/dispatch/task_packet.rs` — `TaskPacket` — structured task packet conforming to `task-packet-v1`
 - `src/monitor/mod.rs` — `emit_status()` — builds and sends `workflow-status-v1` for operator visibility
+- `src/outcome.rs` — `WorkflowOutcome::build()` — produces `workflow-outcome-v1` at workflow completion
 
 Breaking change impact: if `dispatch-request-v1` shape changes, Canopy will reject task creation calls and workflows will stall at dispatch. If `workflow-status-v1` changes, Cap will misrender operator views.
 
@@ -154,10 +158,13 @@ Breaking change impact: if `dispatch-request-v1` shape changes, Canopy will reje
 | Contract | Source | Protocol | Schema |
 |----------|--------|----------|--------|
 | `canopy-task-detail-v1` | Canopy | MCP tool `canopy_get_task` or CLI `canopy api task` | `septa/canopy-task-detail-v1.schema.json` |
+| `capability-registry-v1` | Hymenium/ecosystem | File read from `~/.local/share/basidiocarp/capability-registry.json` | `septa/capability-registry-v1.schema.json` |
+| `capability-runtime-lease-v1` | Hymenium/ecosystem | File read from runtime lease directory | `septa/capability-runtime-lease-v1.schema.json` |
 | Handoff documents | `.handoffs/` directory | File read | Structured markdown (see `src/parser/`) |
 
 **Receiver source files:**
 - `src/monitor/mod.rs` — `poll_canopy()` — reads `canopy-task-detail-v1` to evaluate completeness gates
+- `src/dispatch/capability_client.rs` — `load_registry()` — reads `capability-registry-v1` and `capability-runtime-lease-v1` to resolve model capability for dispatch routing
 - `src/parser/markdown.rs` — `parse_handoff()` — reads raw handoff markdown and returns `ParsedHandoff`
 
 ### Shared Dependencies

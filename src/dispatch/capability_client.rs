@@ -259,6 +259,7 @@ pub const DISPATCH_CAPABILITY: &str = "workflow.dispatch.v1";
 /// Adapts the internal `CanopyClient::create_task` interface into the Septa
 /// `dispatch-request-v1` wire format.  Fields that have no direct mapping are
 /// given safe defaults.
+#[must_use] 
 pub fn build_dispatch_request(
     _title: &str,
     _description: &str,

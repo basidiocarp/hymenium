@@ -41,7 +41,11 @@ pub fn handle_signal(
             // Read the current retry count from the workflow's phase state.
             // This ensures recovery decisions use the actual count, not a stale value.
             let current_retry_count = workflow.current_phase().map_or(0, |p| p.retry_count);
-            let action = decide_recovery(signal, current_retry_count, policy);
+            // Get the current agent tier from the template phase.
+            let current_tier = workflow
+                .current_template_phase()
+                .map_or(&crate::workflow::template::AgentTier::Sonnet, |p| &p.agent_tier);
+            let action = decide_recovery(signal, current_retry_count, policy, current_tier);
 
             // If the recovery action is Retry, increment the retry counter and persist it.
             if matches!(action, RecoveryAction::Retry { .. }) {

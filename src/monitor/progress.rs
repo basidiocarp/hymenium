@@ -46,7 +46,7 @@ pub fn check_progress(
     if task.status == "failed" {
         return Ok(ProgressSignal::Failed {
             phase_id: phase.phase_id.clone(),
-            error: format!("canopy task {} failed", task_id),
+            error: format!("canopy task {task_id} failed"),
         });
     }
 
@@ -119,6 +119,7 @@ pub fn check_progress(
 }
 
 /// Returns `true` when the signal indicates a stalled phase.
+#[must_use] 
 pub fn is_stalled(signal: &ProgressSignal) -> bool {
     matches!(signal, ProgressSignal::Stalled { .. })
 }

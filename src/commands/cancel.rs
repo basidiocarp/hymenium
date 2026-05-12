@@ -42,7 +42,7 @@ pub fn run(workflow_id: &str, store: &WorkflowStore) -> Result<(), CancelCommand
         }
         WorkflowStatus::Cancelled => {
             // Idempotent: cancelling an already-cancelled workflow is a no-op.
-            println!("Workflow {} is already cancelled.", workflow_id);
+            println!("Workflow {workflow_id} is already cancelled.");
             return Ok(());
         }
         // Allow cancellation of Pending, Dispatched, InProgress, BlockedOnGate, AwaitingRepair
@@ -76,7 +76,7 @@ pub fn run(workflow_id: &str, store: &WorkflowStore) -> Result<(), CancelCommand
         Ok(())
     })?;
 
-    println!("Workflow {} cancelled.", workflow_id);
+    println!("Workflow {workflow_id} cancelled.");
     println!(
         "Note: Canopy tasks associated with this workflow may still be open. \
          Close them via the Canopy CLI or MCP surface separately."

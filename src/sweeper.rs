@@ -81,6 +81,7 @@ pub enum RuntimeStatus {
 }
 
 impl RuntimeStatus {
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             RuntimeStatus::Online => "online",
@@ -223,8 +224,7 @@ impl RuntimeRegistry {
                 Err(e) => {
                     warn!("sweeper: invalid last_heartbeat for {}: {e}", id);
                     errors.push(format!(
-                        "corrupt timestamp for runtime {}: invalid last_heartbeat: {e}",
-                        id
+                        "corrupt timestamp for runtime {id}: invalid last_heartbeat: {e}"
                     ));
                     // Use a very old timestamp so the runtime will be marked offline
                     // on the next sweep, preventing orphan masking.
@@ -237,8 +237,7 @@ impl RuntimeRegistry {
                 Err(e) => {
                     warn!("sweeper: invalid registered_at for {}: {e}", id);
                     errors.push(format!(
-                        "corrupt timestamp for runtime {}: invalid registered_at: {e}",
-                        id
+                        "corrupt timestamp for runtime {id}: invalid registered_at: {e}"
                     ));
                     // Use a very old timestamp as fallback
                     Utc::now() - chrono::Duration::days(365)
@@ -250,8 +249,7 @@ impl RuntimeRegistry {
                     .map_err(|e| {
                         warn!("sweeper: invalid went_offline_at for {}: {e}", id);
                         errors.push(format!(
-                            "corrupt timestamp for runtime {}: invalid went_offline_at: {e}",
-                            id
+                            "corrupt timestamp for runtime {id}: invalid went_offline_at: {e}"
                         ));
                         e
                     })

@@ -73,6 +73,7 @@ impl ContextMessage {
         }
     }
 
+    #[must_use] 
     pub fn token_cost(&self) -> usize {
         estimate_text_tokens(&self.content).saturating_add(4)
     }
@@ -232,6 +233,7 @@ fn prune_to_budget(
 }
 
 /// Remove orphaned tool results and insert stub results for retained tool calls.
+#[must_use] 
 pub fn sanitize_tool_pairs(
     messages: Vec<ContextMessage>,
 ) -> (Vec<ContextMessage>, CompressionReport) {
@@ -432,6 +434,7 @@ fn truncate_message_to_budget(
     ))
 }
 
+#[must_use] 
 pub fn estimate_text_tokens(text: &str) -> usize {
     text.split_whitespace().count()
 }

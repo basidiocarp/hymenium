@@ -211,6 +211,7 @@ impl WorkflowInstance {
     }
 
     /// Get the current phase, if any.
+    #[must_use] 
     pub fn current_phase(&self) -> Option<&PhaseState> {
         self.phase_states.get(self.current_phase_idx)
     }
@@ -226,7 +227,8 @@ impl WorkflowInstance {
     }
 
     /// Get the template phase definition for the current phase.
-    fn current_template_phase(&self) -> Option<&crate::workflow::template::Phase> {
+    #[must_use] 
+    pub fn current_template_phase(&self) -> Option<&crate::workflow::template::Phase> {
         self.template.phases.get(self.current_phase_idx)
     }
 
@@ -246,8 +248,7 @@ impl WorkflowInstance {
 
         if phase_status != PhaseStatus::Pending {
             return Err(WorkflowError::StateError(format!(
-                "cannot start phase {} in status {:?}",
-                phase_id, phase_status
+                "cannot start phase {phase_id} in status {phase_status:?}"
             )));
         }
 
@@ -274,7 +275,7 @@ impl WorkflowInstance {
                 self.blocked_on = Some(error_msg.clone());
                 return Err(WorkflowError::GateFailed {
                     phase_id,
-                    reason: format!("artifact prerequisites not met: {}", error_msg),
+                    reason: format!("artifact prerequisites not met: {error_msg}"),
                 });
             }
         }
@@ -491,8 +492,7 @@ impl WorkflowInstance {
 
         if phase_status != PhaseStatus::Active {
             return Err(WorkflowError::StateError(format!(
-                "cannot record tool failure for phase {} in status {:?}",
-                phase_id, phase_status
+                "cannot record tool failure for phase {phase_id} in status {phase_status:?}"
             )));
         }
 
@@ -542,8 +542,7 @@ impl WorkflowInstance {
 
         if phase_status != PhaseStatus::Active {
             return Err(WorkflowError::StateError(format!(
-                "cannot record request for phase {} in status {:?}",
-                phase_id, phase_status
+                "cannot record request for phase {phase_id} in status {phase_status:?}"
             )));
         }
 
@@ -574,6 +573,7 @@ impl WorkflowInstance {
     ///
     /// Uses the per-phase override when set; otherwise inherits from the
     /// workflow-level template default.
+    #[must_use] 
     pub fn effective_tool_failure_ceiling(&self) -> u32 {
         self.template
             .phases
@@ -583,6 +583,7 @@ impl WorkflowInstance {
     }
 
     /// Resolve the effective request ceiling for the current phase.
+    #[must_use] 
     pub fn effective_request_ceiling(&self) -> u32 {
         self.template
             .phases
@@ -770,6 +771,7 @@ impl WorkflowInstance {
     }
 
     /// Get the duration of a completed phase.
+    #[must_use] 
     pub fn phase_duration(&self, idx: usize) -> Option<chrono::Duration> {
         let phase = self.get_phase(idx)?;
         let started = phase.started_at?;
@@ -857,6 +859,7 @@ pub struct WorkflowRuntime {
 
 impl WorkflowRuntime {
     /// Create a new workflow runtime in initial state.
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             state: "idle".to_string(),

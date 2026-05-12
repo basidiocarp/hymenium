@@ -345,7 +345,7 @@ fn build_constraints(handoff: &ParsedHandoff) -> Vec<String> {
     let mut constraints = Vec::new();
     if let Some(meta) = &handoff.metadata {
         for scope in &meta.allowed_write_scope {
-            constraints.push(format!("Write scope limited to {}", scope));
+            constraints.push(format!("Write scope limited to {scope}"));
         }
         // For read-only source tasks that can write artifacts, surface the boundary explicitly.
         if !meta.allowed_write_scope.is_empty() {
@@ -356,13 +356,12 @@ fn build_constraints(handoff: &ParsedHandoff) -> Vec<String> {
             if !has_source_write {
                 let paths = meta.allowed_write_scope.join(", ");
                 constraints.push(format!(
-                    "Source code is read-only; artifact writes allowed at: {}",
-                    paths
+                    "Source code is read-only; artifact writes allowed at: {paths}"
                 ));
             }
         }
         for goal in &meta.non_goals {
-            constraints.push(format!("Non-goal (do not implement): {}", goal));
+            constraints.push(format!("Non-goal (do not implement): {goal}"));
         }
     }
     constraints
@@ -374,7 +373,7 @@ fn build_acceptance_criteria(handoff: &ParsedHandoff) -> Vec<String> {
     for step in &handoff.steps {
         if let Some(verification) = &step.verification {
             for cmd in &verification.commands {
-                criteria.push(format!("Verification passes: {}", cmd));
+                criteria.push(format!("Verification passes: {cmd}"));
             }
         }
         for item in &step.checklist {
@@ -389,6 +388,7 @@ fn build_acceptance_criteria(handoff: &ParsedHandoff) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// Generate an agent name following the `<role>/<repo>/<handoff-slug>/<run>` convention.
+#[must_use] 
 pub fn agent_name(role: &AgentRole, repo: &str, handoff_slug: &str, run: u32) -> String {
     format!("{role}/{repo}/{handoff_slug}/{run}")
 }
@@ -398,6 +398,7 @@ pub fn agent_name(role: &AgentRole, repo: &str, handoff_slug: &str, run: u32) ->
 /// Lowercases the input, replaces whitespace and non-alphanumeric characters
 /// (except hyphens) with hyphens, collapses runs of hyphens, and trims
 /// leading/trailing hyphens.
+#[must_use] 
 pub fn handoff_slug(title: &str) -> String {
     let slug: String = title
         .to_lowercase()
@@ -869,8 +870,7 @@ mod tests {
         assert_eq!(
             non_goal_constraints.len(),
             1,
-            "expected exactly one non-goal constraint, got: {:?}",
-            non_goal_constraints
+            "expected exactly one non-goal constraint, got: {non_goal_constraints:?}"
         );
         assert_eq!(
             non_goal_constraints[0],
@@ -950,8 +950,7 @@ mod tests {
         assert_eq!(
             boundary.len(),
             1,
-            "expected exactly one artifact boundary constraint, got: {:?}",
-            constraints
+            "expected exactly one artifact boundary constraint, got: {constraints:?}"
         );
         assert!(
             boundary[0].contains("docs/audit/"),
