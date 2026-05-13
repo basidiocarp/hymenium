@@ -126,6 +126,7 @@ fn resolve_canopy_binary_errors_when_not_found() {
 ///
 /// We write a helper script that dumps its full environment to stdout, then
 /// check that the secret we injected into the test process's env is absent.
+#[allow(unsafe_code)]
 #[test]
 fn env_vars_are_stripped_from_child_process() {
     let script_dir = TempDir::new().unwrap();
@@ -179,6 +180,7 @@ fn env_vars_are_stripped_from_child_process() {
 /// The absolute path bypasses PATH resolution entirely, so no impostor placed
 /// anywhere in PATH can intercept dispatch when the operator has configured
 /// an explicit binary path.
+#[allow(unsafe_code)]
 #[test]
 fn client_with_absolute_bin_does_not_use_path_impostor() {
     let real_dir = TempDir::new().unwrap();
