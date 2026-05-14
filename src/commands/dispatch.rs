@@ -6,6 +6,7 @@ use crate::store::{StoreError, WorkflowStore};
 use crate::workflow::WorkflowId;
 use crate::workflow::engine::WorkflowInstance;
 use crate::workflow::template::{TemplateRegistry, impl_audit_default};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use thiserror::Error;
 use ulid::Ulid;
@@ -33,6 +34,9 @@ pub enum DispatchCommandError {
 /// Run the `dispatch` command: parse the handoff, create a workflow instance,
 /// dispatch it via Canopy, persist it, and print the workflow ID.
 ///
+/// If a non-terminal workflow with the same handoff content already exists,
+/// returns that existing workflow without re-dispatching.
+///
 /// # Panics
 ///
 /// Panics if the built-in `impl-audit` template fails validation, which should
@@ -42,6 +46,16 @@ pub fn run(path: &Path, store: &WorkflowStore) -> Result<WorkflowInstance, Dispa
         path: path.display().to_string(),
         source: e,
     })?;
+
+    // Compute SHA256 hash of the handoff content for deduplication.
+    let mut hasher = Sha256::new();
+    hasher.update(&source);
+    let content_hash = format!("{:x}", hasher.finalize());
+
+    // Check if we've already dispatched this handoff (non-terminal workflow exists).
+    if let Some(existing) = store.find_workflow_by_hash(&content_hash)? {
+        return Ok(existing);
+    }
 
     let handoff = parse_handoff(&source)?;
 
@@ -75,7 +89,7 @@ pub fn run(path: &Path, store: &WorkflowStore) -> Result<WorkflowInstance, Dispa
     )?;
 
     // Insert the workflow row first so the FK on workflow_transitions is satisfied.
-    store.insert_workflow(&instance)?;
+    store.insert_workflow_with_hash(&instance, Some(&content_hash))?;
 
     // Record the initial transition after the parent row exists.
     store.record_transition(
@@ -155,7 +169,7 @@ mod tests {
         // This is the exact write sequence from commands/dispatch.rs `run()`.
         // A reversed order (record_transition first) would fail with a FK error.
         store
-            .insert_workflow(&instance)
+            .insert_workflow_with_hash(&instance, None)
             .expect("insert_workflow must succeed before record_transition");
         store
             .record_transition(

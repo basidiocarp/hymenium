@@ -127,7 +127,8 @@ impl WorkflowStore {
                 blocked_on       TEXT,
                 created_at       TEXT NOT NULL,
                 updated_at       TEXT NOT NULL,
-                template_json    TEXT NOT NULL
+                template_json    TEXT NOT NULL,
+                content_hash     TEXT
             );
 
             CREATE TABLE IF NOT EXISTS phase_states (
@@ -191,6 +192,8 @@ impl WorkflowStore {
             "INTEGER NOT NULL DEFAULT 0",
         )?;
 
+        self.ensure_column("workflows", "content_hash", "TEXT")?;
+
         Ok(())
     }
 
@@ -232,6 +235,15 @@ impl WorkflowStore {
 
     /// Insert a new workflow instance (must not already exist).
     pub fn insert_workflow(&self, inst: &WorkflowInstance) -> Result<(), StoreError> {
+        self.insert_workflow_with_hash(inst, None)
+    }
+
+    /// Insert a new workflow instance with an optional content hash for deduplication.
+    pub fn insert_workflow_with_hash(
+        &self,
+        inst: &WorkflowInstance,
+        content_hash: Option<&str>,
+    ) -> Result<(), StoreError> {
         let template_json = serde_json::to_string(&inst.template)?;
         let current_phase = inst.current_phase().map(|p| p.phase_id.as_str());
         let current_phase_idx =
@@ -244,8 +256,8 @@ impl WorkflowStore {
         self.conn.execute(
             "INSERT INTO workflows
                 (workflow_id, template_id, handoff_path, status, current_phase,
-                 current_phase_idx, blocked_on, created_at, updated_at, template_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 current_phase_idx, blocked_on, created_at, updated_at, template_json, content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 inst.workflow_id.0,
                 inst.template.template_id,
@@ -257,6 +269,7 @@ impl WorkflowStore {
                 inst.created_at.to_rfc3339(),
                 inst.updated_at.to_rfc3339(),
                 template_json,
+                content_hash,
             ],
         )?;
 
@@ -343,6 +356,32 @@ impl WorkflowStore {
             created_at,
             updated_at,
         }))
+    }
+
+    /// Find a workflow by content hash that is not in a terminal state.
+    ///
+    /// Returns the most recent non-terminal workflow with the given content hash,
+    /// or `None` if no such workflow exists. Terminal states are: `completed`,
+    /// `failed`, `cancelled`, and `user_terminated`.
+    pub fn find_workflow_by_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<WorkflowInstance>, StoreError> {
+        let row: Result<String, _> = self.conn.query_row(
+            "SELECT workflow_id FROM workflows
+             WHERE content_hash = ?1
+               AND status NOT IN ('completed', 'failed', 'cancelled', 'user_terminated')
+             ORDER BY created_at DESC
+             LIMIT 1",
+            params![hash],
+            |r| r.get(0),
+        );
+
+        match row {
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(StoreError::Sqlite(e)),
+            Ok(wf_id) => self.get_workflow(&WorkflowId(wf_id)),
+        }
     }
 
     /// Update the top-level status and `blocked_on` for a workflow.
@@ -1172,5 +1211,51 @@ mod tests {
             )
             .expect("pragma query");
         assert_eq!(idx, 1, "current_phase_idx column should exist exactly once");
+    }
+
+    #[test]
+    fn test_find_workflow_by_hash_returns_non_terminal() {
+        let store = temp_store();
+        let inst = make_instance("01JNQWHASH00000000000001");
+        let hash = "abc123deadbeef";
+
+        store
+            .insert_workflow_with_hash(&inst, Some(hash))
+            .expect("insert with hash");
+
+        let found = store
+            .find_workflow_by_hash(hash)
+            .expect("query should succeed");
+        assert!(
+            found.is_some(),
+            "should find a non-terminal workflow by hash"
+        );
+        assert_eq!(
+            found.unwrap().workflow_id,
+            inst.workflow_id,
+            "returned id should match inserted workflow"
+        );
+    }
+
+    #[test]
+    fn test_find_workflow_by_hash_returns_none_for_terminal() {
+        let store = temp_store();
+        let inst = make_instance("01JNQWHASH00000000000002");
+        let hash = "def456cafebabe";
+
+        store
+            .insert_workflow_with_hash(&inst, Some(hash))
+            .expect("insert with hash");
+        store
+            .update_workflow_status(&inst.workflow_id, &WorkflowStatus::Completed, None)
+            .expect("mark completed");
+
+        let found = store
+            .find_workflow_by_hash(hash)
+            .expect("query should succeed");
+        assert!(
+            found.is_none(),
+            "terminal workflow should not be returned by hash lookup"
+        );
     }
 }
