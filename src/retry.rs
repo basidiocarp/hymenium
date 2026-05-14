@@ -229,7 +229,7 @@ fn decide_progressive_recovery(
 /// | `TaskTooLarge`         | Retry with narrowed scope on first attempt, then escalate |
 /// | `MissingDependency`    | Cancel (dependency gating must be resolved first)|
 /// | `ExecutionIncomplete`  | Retry within `max_retries`, then escalate        |
-/// | `MinorDefect`          | Retry once for a focused repair loop             |
+/// | `MinorDefect`          | Retry within `max_retries`, then escalate        |
 #[must_use]
 pub fn decide_recovery_typed(
     failure: &TypedFailure,
@@ -322,24 +322,24 @@ pub fn decide_recovery_typed(
             }
         }
 
-        // Minor defect: retry once for a focused repair loop without narrowing
-        // scope. Escalate if the defect persists beyond one retry.
+        // Minor defect: retry up to policy.max_retries times for a focused repair
+        // loop. Escalate once the budget is exhausted.
         FailureKind::MinorDefect => {
-            if retry_count == 0 {
-                RecoveryAction::Retry {
-                    narrowed_scope: None,
-                    new_tier: None,
-                }
-            } else {
+            if retry_count >= policy.max_retries {
                 RecoveryAction::Escalate {
                     reason: format!(
-                        "minor defect persisted after repair attempt — escalating for review{}",
+                        "minor defect persisted after {retry_count} retries — escalating for review{}",
                         failure
                             .detail
                             .as_deref()
                             .map(|d| format!(": {d}"))
                             .unwrap_or_default()
                     ),
+                }
+            } else {
+                RecoveryAction::Retry {
+                    narrowed_scope: None,
+                    new_tier: None,
                 }
             }
         }
@@ -627,24 +627,45 @@ mod tests {
     }
 
     #[test]
-    fn minor_defect_retries_once() {
-        let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 0, &policy());
-        match action {
-            RecoveryAction::Retry { narrowed_scope, .. } => {
-                // repair loop — no scope narrowing
-                assert!(
-                    narrowed_scope.is_none(),
-                    "MinorDefect repair retry should not narrow scope"
-                );
+    fn minor_defect_retries_while_under_budget() {
+        // default policy has max_retries=2; both retry_count=0 and retry_count=1 should Retry
+        for count in [0, 1] {
+            let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), count, &policy());
+            match action {
+                RecoveryAction::Retry { narrowed_scope, .. } => {
+                    assert!(
+                        narrowed_scope.is_none(),
+                        "MinorDefect repair retry should not narrow scope"
+                    );
+                }
+                other => panic!("retry_count={count}: expected Retry, got {other:?}"),
             }
-            other => panic!("expected Retry, got {other:?}"),
         }
     }
 
     #[test]
-    fn minor_defect_escalates_after_repair_attempt() {
-        let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 1, &policy());
+    fn minor_defect_escalates_when_budget_exhausted() {
+        // max_retries=1: retry_count=1 should escalate
+        let policy = RetryPolicy {
+            max_retries: 1,
+            ..RetryPolicy::default()
+        };
+        let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 1, &policy);
         assert!(matches!(action, RecoveryAction::Escalate { .. }));
+    }
+
+    #[test]
+    fn minor_defect_respects_higher_max_retries() {
+        // max_retries=3: retry_count=1 should still retry
+        let policy = RetryPolicy {
+            max_retries: 3,
+            ..RetryPolicy::default()
+        };
+        let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 1, &policy);
+        assert!(
+            matches!(action, RecoveryAction::Retry { .. }),
+            "MinorDefect should retry when retry_count < max_retries"
+        );
     }
 
     // -- escalate_tier_on_retry -----------------------------------------------
