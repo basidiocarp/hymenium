@@ -268,6 +268,17 @@ impl EvidenceGateEvaluator {
     pub fn new(task: crate::dispatch::TaskDetail) -> Self {
         Self { task }
     }
+
+    /// Check for audit verdict evidence on the task.
+    ///
+    /// Returns `Some((passed, reason))` if audit evidence exists, `None` if no verdict found.
+    /// Currently returns `None` as a stub — audit verdict binding is not yet wired up.
+    #[allow(clippy::unused_self)]
+    fn find_audit_verdict(&self) -> Option<(bool, String)> {
+        // Placeholder: no audit verdict field on TaskDetail yet.
+        // When audit evidence is wired, this will check task fields and return a verdict.
+        None
+    }
 }
 
 impl GateEvaluator for EvidenceGateEvaluator {
@@ -293,10 +304,16 @@ impl GateEvaluator for EvidenceGateEvaluator {
                     "no passing verification evidence for this task".to_string()
                 },
             ),
-            // For conditions not yet backed by evidence fields, default to
-            // conservative pass to avoid blocking non-evidence gates.
+            // Audit gates are fail-closed: require explicit evidence.
             GateCondition::AuditClean | GateCondition::FindingsResolved => {
-                (true, "structural gate — not evidence-backed".to_string())
+                match self.find_audit_verdict() {
+                    Some((passed, reason)) => (passed, reason),
+                    None => (
+                        false,
+                        "audit gate requires explicit evidence binding — no verdict found"
+                            .to_string(),
+                    ),
+                }
             }
             GateCondition::Custom(name) => (
                 false,
@@ -491,5 +508,63 @@ mod tests {
         assert_eq!(json_file.as_str(), Some("file_exists"));
         assert_eq!(json_canary.as_str(), Some("canary_string"));
         assert_eq!(json_exit.as_str(), Some("exit_code"));
+    }
+
+    #[test]
+    fn test_evidence_gate_audit_clean_fails_without_evidence() {
+        let task = crate::dispatch::TaskDetail {
+            task_id: "task-1".to_string(),
+            title: "Test Task".to_string(),
+            status: "pending".to_string(),
+            agent_id: None,
+            parent_id: None,
+            required_capabilities: vec![],
+            has_code_diff: true,
+            has_verification_passed: true,
+        };
+        let evaluator = EvidenceGateEvaluator::new(task);
+        let context = GateContext::new(WorkflowId("test-wf".to_string()), "audit");
+
+        let eval = evaluator
+            .evaluate(&GateCondition::AuditClean, &context)
+            .expect("should evaluate");
+
+        assert!(
+            !eval.passed,
+            "audit_clean should fail without explicit evidence"
+        );
+        assert!(
+            eval.reason.contains("no verdict found"),
+            "reason should mention missing verdict"
+        );
+    }
+
+    #[test]
+    fn test_evidence_gate_findings_resolved_fails_without_evidence() {
+        let task = crate::dispatch::TaskDetail {
+            task_id: "task-2".to_string(),
+            title: "Test Task".to_string(),
+            status: "pending".to_string(),
+            agent_id: None,
+            parent_id: None,
+            required_capabilities: vec![],
+            has_code_diff: true,
+            has_verification_passed: true,
+        };
+        let evaluator = EvidenceGateEvaluator::new(task);
+        let context = GateContext::new(WorkflowId("test-wf".to_string()), "audit");
+
+        let eval = evaluator
+            .evaluate(&GateCondition::FindingsResolved, &context)
+            .expect("should evaluate");
+
+        assert!(
+            !eval.passed,
+            "findings_resolved should fail without explicit evidence"
+        );
+        assert!(
+            eval.reason.contains("no verdict found"),
+            "reason should mention missing verdict"
+        );
     }
 }
