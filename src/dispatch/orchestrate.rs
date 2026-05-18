@@ -217,6 +217,72 @@ fn log_dispatch_error(operation: &str, err: &DispatchError) {
     );
 }
 
+/// Cancel a running task by marking it failed in the workflow store.
+///
+/// The minimal implementation updates the task status in the backing store
+/// without requiring a live Canopy connection. Downstream polling will observe
+/// the status change and handle cascading cancellations if needed.
+///
+/// # Arguments
+///
+/// - `workflow_id`: the workflow this task belongs to
+/// - `task_id`: the canopy task ID to cancel
+/// - `store`: the workflow store for persistence
+///
+/// # Errors
+///
+/// Returns `DispatchError` if the store operation fails or the task is not found.
+#[allow(dead_code)]
+pub fn cancel_task(
+    workflow_id: &crate::workflow::WorkflowId,
+    task_id: &str,
+    store: &crate::store::WorkflowStore,
+) -> Result<(), DispatchError> {
+    // Load the workflow to locate the phase containing this task.
+    let mut instance = store
+        .get_workflow(workflow_id)
+        .map_err(|e| DispatchError::CanopyError(format!("store error: {e}")))?
+        .ok_or_else(|| {
+            DispatchError::InvalidState(format!("workflow {workflow_id} not found"))
+        })?;
+
+    // Find the phase with the matching canopy_task_id and mark it failed.
+    let mut found = false;
+    for phase in &mut instance.phase_states {
+        if let Some(ref id) = phase.canopy_task_id {
+            if id == task_id {
+                found = true;
+                // Mark the phase as failed with a cancellation reason.
+                phase.status = crate::workflow::engine::PhaseStatus::Failed;
+                phase.completed_at = Some(chrono::Utc::now());
+                phase.failure_reason = Some("task cancelled".to_string());
+                break;
+            }
+        }
+    }
+
+    if !found {
+        return Err(DispatchError::InvalidState(
+            format!("task {task_id} not found in workflow {workflow_id}"),
+        ));
+    }
+
+    // Persist the updated phase state.
+    for (order, phase) in instance.phase_states.iter().enumerate() {
+        store
+            .upsert_phase_state(workflow_id, phase, order)
+            .map_err(|e| DispatchError::CanopyError(format!("store error: {e}")))?;
+    }
+
+    tracing::info!(
+        workflow_id = %workflow_id,
+        task_id,
+        "task cancelled and persisted"
+    );
+
+    Ok(())
+}
+
 fn build_dispatch_context_messages(handoff: &ParsedHandoff) -> Vec<ContextMessage> {
     let mut messages = vec![
         ContextMessage::text("handoff-title", ContextMessageRole::System, &handoff.title),

@@ -68,6 +68,24 @@ enum Commands {
         #[arg(value_name = "WORKFLOW_ID")]
         workflow_id: String,
     },
+
+    /// Force-fail a workflow with a reason
+    Fail {
+        /// Workflow ID to fail
+        #[arg(value_name = "WORKFLOW_ID")]
+        workflow_id: String,
+
+        /// Reason for the failure
+        #[arg(long)]
+        reason: String,
+    },
+
+    /// Force-complete a workflow
+    Complete {
+        /// Workflow ID to complete
+        #[arg(value_name = "WORKFLOW_ID")]
+        workflow_id: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -117,6 +135,21 @@ fn main() -> Result<()> {
             hymenium::commands::resume::run(&workflow_id, &store)
                 .with_context(|| format!("resume failed for {workflow_id}"))?;
         }
+
+        Commands::Fail {
+            workflow_id,
+            reason,
+        } => {
+            let store = open_store()?;
+            hymenium::commands::fail::run(&workflow_id, &reason, &store)
+                .with_context(|| format!("fail failed for {workflow_id}"))?;
+        }
+
+        Commands::Complete { workflow_id } => {
+            let store = open_store()?;
+            hymenium::commands::complete::run(&workflow_id, &store)
+                .with_context(|| format!("complete failed for {workflow_id}"))?;
+        }
     }
 
     Ok(())
@@ -125,6 +158,8 @@ fn main() -> Result<()> {
 /// Open the workflow store, defaulting to the path from env or XDG conventions.
 fn open_store() -> Result<WorkflowStore> {
     let db_path = WorkflowStore::default_path();
+    let _sweeper = hymenium::sweeper::Sweeper::start(db_path.clone())
+        .context("failed to start sweeper")?;
     WorkflowStore::open(&db_path)
         .with_context(|| format!("could not open workflow store at {}", db_path.display()))
 }

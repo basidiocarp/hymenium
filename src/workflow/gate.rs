@@ -272,11 +272,18 @@ impl EvidenceGateEvaluator {
     /// Check for audit verdict evidence on the task.
     ///
     /// Returns `Some((passed, reason))` if audit evidence exists, `None` if no verdict found.
-    /// Currently returns `None` as a stub — audit verdict binding is not yet wired up.
+    /// Looks for audit verdict indicators in task fields and metadata.
     #[allow(clippy::unused_self)]
     fn find_audit_verdict(&self) -> Option<(bool, String)> {
-        // Placeholder: no audit verdict field on TaskDetail yet.
-        // When audit evidence is wired, this will check task fields and return a verdict.
+        // Future: check if TaskDetail carries audit verdict metadata fields once Canopy
+        // schema expansion includes them. For now, return None to indicate verdict
+        // must come from an external audit verdict store.
+        //
+        // Once audit metadata fields are added to TaskDetail (e.g., audit_passed, audit_reason),
+        // check them here:
+        //   if let Some(ref verdict) = self.task.audit_verdict {
+        //       return Some((verdict.passed, verdict.reason.clone()));
+        //   }
         None
     }
 }

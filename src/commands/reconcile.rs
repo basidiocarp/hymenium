@@ -178,7 +178,9 @@ mod tests {
                 _root: &str,
                 _opts: &TaskOptions,
             ) -> Result<String, DispatchError> {
-                unimplemented!()
+                Err(DispatchError::CanopyError(
+                    "FixedStatusMock: create_task not implemented".to_string(),
+                ))
             }
             fn create_subtask(
                 &self,
@@ -187,7 +189,9 @@ mod tests {
                 _desc: &str,
                 _opts: &TaskOptions,
             ) -> Result<String, DispatchError> {
-                unimplemented!()
+                Err(DispatchError::CanopyError(
+                    "FixedStatusMock: create_subtask not implemented".to_string(),
+                ))
             }
             fn assign_task(
                 &self,
@@ -195,7 +199,9 @@ mod tests {
                 _agent: &str,
                 _by: &str,
             ) -> Result<(), DispatchError> {
-                unimplemented!()
+                Err(DispatchError::CanopyError(
+                    "FixedStatusMock: assign_task not implemented".to_string(),
+                ))
             }
             fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
                 let statuses = self.task_statuses.borrow();
@@ -227,7 +233,9 @@ mod tests {
                 _path: &str,
                 _assign_to: Option<&str>,
             ) -> Result<ImportResult, DispatchError> {
-                unimplemented!()
+                Err(DispatchError::CanopyError(
+                    "FixedStatusMock: import_handoff not implemented".to_string(),
+                ))
             }
         }
 
