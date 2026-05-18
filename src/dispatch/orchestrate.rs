@@ -376,11 +376,13 @@ fn role_label(role: ContextMessageRole) -> &'static str {
 }
 
 fn truncate_rendered_context(text: &str, token_budget: usize) -> String {
-    let words = text.split_whitespace().collect::<Vec<_>>();
-    if words.len() <= token_budget {
+    // Count words first (allocation-free) to avoid collecting into a Vec on
+    // the common no-truncation path.
+    let count = text.split_whitespace().count();
+    if count <= token_budget {
         return text.to_string();
     }
-
+    let words: Vec<&str> = text.split_whitespace().collect();
     words[..token_budget].join(" ")
 }
 

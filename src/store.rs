@@ -431,22 +431,178 @@ impl WorkflowStore {
     }
 
     /// List all workflows that are not in a terminal state.
+    ///
+    /// Uses two queries instead of N+1: one to fetch all active workflow rows,
+    /// and one to fetch all their phase_states in a single IN clause.
     pub fn list_active_workflows(&self) -> Result<Vec<WorkflowInstance>, StoreError> {
+        // Query 1: fetch all active workflow rows in one round-trip.
         let mut stmt = self.conn.prepare(
-            "SELECT workflow_id FROM workflows
+            "SELECT workflow_id, template_id, handoff_path, status, current_phase,
+                    current_phase_idx, blocked_on, created_at, updated_at, template_json
+             FROM workflows
              WHERE status NOT IN ('completed', 'failed', 'cancelled', 'user_terminated')
              ORDER BY created_at DESC",
         )?;
 
-        let ids: Vec<String> = stmt
-            .query_map([], |row| row.get(0))?
+        type WorkflowRow = (
+            String,         // workflow_id (0)
+            String,         // handoff_path (2)
+            String,         // status (3)
+            Option<String>, // current_phase (4)
+            i64,            // current_phase_idx (5)
+            Option<String>, // blocked_on (6)
+            String,         // created_at (7)
+            String,         // updated_at (8)
+            String,         // template_json (9)
+        );
+
+        let workflow_rows: Vec<WorkflowRow> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,         // workflow_id
+                    row.get::<_, String>(2)?,         // handoff_path
+                    row.get::<_, String>(3)?,         // status
+                    row.get::<_, Option<String>>(4)?, // current_phase
+                    row.get::<_, i64>(5)?,            // current_phase_idx
+                    row.get::<_, Option<String>>(6)?, // blocked_on
+                    row.get::<_, String>(7)?,         // created_at
+                    row.get::<_, String>(8)?,         // updated_at
+                    row.get::<_, String>(9)?,         // template_json
+                ))
+            })?
             .collect::<Result<_, _>>()?;
 
-        let mut results = Vec::with_capacity(ids.len());
-        for id in ids {
-            if let Some(inst) = self.get_workflow(&WorkflowId(id))? {
-                results.push(inst);
+        if workflow_rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Query 2: fetch all phase_states for the active workflows in one round-trip.
+        // SQLite supports up to 999 bound parameters; chunk if needed.
+        let ids: Vec<&str> = workflow_rows
+            .iter()
+            .map(|(id, ..)| id.as_str())
+            .collect();
+
+        // Build a map from workflow_id to phase_states.
+        let mut phase_map: std::collections::HashMap<String, Vec<PhaseState>> =
+            std::collections::HashMap::with_capacity(ids.len());
+
+        for chunk in ids.chunks(999) {
+            let placeholders = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("?{}", i + 1))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let sql = format!(
+                "SELECT workflow_id, phase_id, role, status, agent_id, started_at,
+                        completed_at, canopy_task_id, retry_count, failure_reason,
+                        pending_message, tool_failure_count, request_count
+                 FROM phase_states
+                 WHERE workflow_id IN ({placeholders})
+                 ORDER BY workflow_id, phase_order ASC"
+            );
+            let mut ps_stmt = self.conn.prepare(&sql)?;
+            let ps_rows = ps_stmt
+                .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,         // workflow_id
+                        row.get::<_, String>(1)?,         // phase_id
+                        row.get::<_, String>(2)?,         // role
+                        row.get::<_, String>(3)?,         // status
+                        row.get::<_, Option<String>>(4)?, // agent_id
+                        row.get::<_, Option<String>>(5)?, // started_at
+                        row.get::<_, Option<String>>(6)?, // completed_at
+                        row.get::<_, Option<String>>(7)?, // canopy_task_id
+                        row.get::<_, u32>(8)?,            // retry_count
+                        row.get::<_, Option<String>>(9)?, // failure_reason
+                        row.get::<_, Option<String>>(10)?,// pending_message
+                        row.get::<_, u32>(11)?,           // tool_failure_count
+                        row.get::<_, u32>(12)?,           // request_count
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            for (
+                wf_id,
+                phase_id,
+                role_str,
+                status_str,
+                agent_id,
+                started_str,
+                completed_str,
+                canopy_id,
+                retry_count,
+                failure_reason,
+                pending_message,
+                tool_failure_count,
+                request_count,
+            ) in ps_rows
+            {
+                let role = parse_agent_role(&role_str)?;
+                let phase_status = parse_phase_status(&status_str)?;
+                let started_at = started_str
+                    .map(|s| parse_datetime(&s, "started_at"))
+                    .transpose()?;
+                let completed_at = completed_str
+                    .map(|s| parse_datetime(&s, "completed_at"))
+                    .transpose()?;
+                phase_map.entry(wf_id).or_default().push(PhaseState {
+                    phase_id,
+                    role,
+                    status: phase_status,
+                    agent_id,
+                    canopy_task_id: canopy_id,
+                    started_at,
+                    completed_at,
+                    failure_reason,
+                    pending_message,
+                    retry_count,
+                    tool_failure_count,
+                    request_count,
+                });
             }
+        }
+
+        // Assemble WorkflowInstance values from the two result sets.
+        let mut results = Vec::with_capacity(workflow_rows.len());
+        for (
+            wf_id,
+            handoff_path,
+            status_str,
+            _current_phase,
+            current_phase_idx_i64,
+            blocked_on,
+            created_at_str,
+            updated_at_str,
+            template_json,
+        ) in workflow_rows
+        {
+            let status = parse_workflow_status(&status_str)?;
+            let template: WorkflowTemplate = serde_json::from_str(&template_json)?;
+            let created_at = parse_datetime(&created_at_str, "created_at")?;
+            let updated_at = parse_datetime(&updated_at_str, "updated_at")?;
+            let current_phase_idx =
+                usize::try_from(current_phase_idx_i64).map_err(|_| StoreError::InvalidValue {
+                    field: "current_phase_idx",
+                    value: current_phase_idx_i64.to_string(),
+                    reason: format!(
+                        "value {current_phase_idx_i64} is negative or exceeds usize::MAX"
+                    ),
+                })?;
+            let phase_states = phase_map.remove(&wf_id).unwrap_or_default();
+            results.push(WorkflowInstance {
+                workflow_id: WorkflowId(wf_id),
+                template,
+                handoff_path,
+                status,
+                blocked_on,
+                current_phase_idx,
+                phase_states,
+                transitions: Vec::new(),
+                created_at,
+                updated_at,
+            });
         }
         Ok(results)
     }
@@ -738,13 +894,24 @@ fn parse_phase_status(s: &str) -> Result<PhaseStatus, StoreError> {
 }
 
 fn parse_agent_role(s: &str) -> Result<AgentRole, StoreError> {
-    // Deserialize via serde_json round-trip to reuse the canonical serde renames.
-    let json = serde_json::Value::String(s.to_string());
-    serde_json::from_value(json).map_err(|_| StoreError::InvalidValue {
-        field: "role",
-        value: s.to_string(),
-        reason: "unknown agent role".to_string(),
-    })
+    // Direct match against the canonical serde rename strings to avoid the
+    // String allocation + serde_json round-trip that the previous implementation used.
+    match s {
+        "Spec Author" => Ok(AgentRole::SpecAuthor),
+        "Workflow Planner" => Ok(AgentRole::WorkflowPlanner),
+        "Packet Compiler" => Ok(AgentRole::PacketCompiler),
+        "Decomposition Checker" => Ok(AgentRole::DecompositionChecker),
+        "Workflow Coordinator" => Ok(AgentRole::WorkflowCoordinator),
+        "Worker" => Ok(AgentRole::Worker),
+        "Output Verifier" => Ok(AgentRole::OutputVerifier),
+        "Repair Worker" => Ok(AgentRole::RepairWorker),
+        "Final Verifier" => Ok(AgentRole::FinalVerifier),
+        other => Err(StoreError::InvalidValue {
+            field: "role",
+            value: other.to_string(),
+            reason: "unknown agent role".to_string(),
+        }),
+    }
 }
 
 fn parse_datetime(s: &str, field: &'static str) -> Result<DateTime<Utc>, StoreError> {
