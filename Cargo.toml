@@ -48,3 +48,7 @@ pedantic = { level = "warn", priority = -1 }
 missing_errors_doc = "allow"
 return_self_not_must_use = "allow"
 format_push_string = "allow"
+# Pre-existing pedantic violations to be addressed incrementally.
+doc_markdown = "allow"
+items_after_statements = "allow"
+too_many_lines = "allow"
