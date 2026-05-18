@@ -242,9 +242,7 @@ pub fn cancel_task(
     let mut instance = store
         .get_workflow(workflow_id)
         .map_err(|e| DispatchError::CanopyError(format!("store error: {e}")))?
-        .ok_or_else(|| {
-            DispatchError::InvalidState(format!("workflow {workflow_id} not found"))
-        })?;
+        .ok_or_else(|| DispatchError::InvalidState(format!("workflow {workflow_id} not found")))?;
 
     // Find the phase with the matching canopy_task_id and mark it failed.
     let mut found = false;
@@ -262,9 +260,9 @@ pub fn cancel_task(
     }
 
     if !found {
-        return Err(DispatchError::InvalidState(
-            format!("task {task_id} not found in workflow {workflow_id}"),
-        ));
+        return Err(DispatchError::InvalidState(format!(
+            "task {task_id} not found in workflow {workflow_id}"
+        )));
     }
 
     // Persist the updated phase state.

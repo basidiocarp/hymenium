@@ -478,10 +478,7 @@ impl WorkflowStore {
 
         // Query 2: fetch all phase_states for the active workflows in one round-trip.
         // SQLite supports up to 999 bound parameters; chunk if needed.
-        let ids: Vec<&str> = workflow_rows
-            .iter()
-            .map(|(id, ..)| id.as_str())
-            .collect();
+        let ids: Vec<&str> = workflow_rows.iter().map(|(id, ..)| id.as_str()).collect();
 
         // Build a map from workflow_id to phase_states.
         let mut phase_map: std::collections::HashMap<String, Vec<PhaseState>> =
@@ -506,19 +503,19 @@ impl WorkflowStore {
             let ps_rows = ps_stmt
                 .query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
                     Ok((
-                        row.get::<_, String>(0)?,         // workflow_id
-                        row.get::<_, String>(1)?,         // phase_id
-                        row.get::<_, String>(2)?,         // role
-                        row.get::<_, String>(3)?,         // status
-                        row.get::<_, Option<String>>(4)?, // agent_id
-                        row.get::<_, Option<String>>(5)?, // started_at
-                        row.get::<_, Option<String>>(6)?, // completed_at
-                        row.get::<_, Option<String>>(7)?, // canopy_task_id
-                        row.get::<_, u32>(8)?,            // retry_count
-                        row.get::<_, Option<String>>(9)?, // failure_reason
-                        row.get::<_, Option<String>>(10)?,// pending_message
-                        row.get::<_, u32>(11)?,           // tool_failure_count
-                        row.get::<_, u32>(12)?,           // request_count
+                        row.get::<_, String>(0)?,          // workflow_id
+                        row.get::<_, String>(1)?,          // phase_id
+                        row.get::<_, String>(2)?,          // role
+                        row.get::<_, String>(3)?,          // status
+                        row.get::<_, Option<String>>(4)?,  // agent_id
+                        row.get::<_, Option<String>>(5)?,  // started_at
+                        row.get::<_, Option<String>>(6)?,  // completed_at
+                        row.get::<_, Option<String>>(7)?,  // canopy_task_id
+                        row.get::<_, u32>(8)?,             // retry_count
+                        row.get::<_, Option<String>>(9)?,  // failure_reason
+                        row.get::<_, Option<String>>(10)?, // pending_message
+                        row.get::<_, u32>(11)?,            // tool_failure_count
+                        row.get::<_, u32>(12)?,            // request_count
                     ))
                 })?
                 .collect::<Result<Vec<_>, _>>()?;

@@ -158,8 +158,8 @@ fn main() -> Result<()> {
 /// Open the workflow store, defaulting to the path from env or XDG conventions.
 fn open_store() -> Result<WorkflowStore> {
     let db_path = WorkflowStore::default_path();
-    let _sweeper = hymenium::sweeper::Sweeper::start(db_path.clone())
-        .context("failed to start sweeper")?;
+    let _sweeper =
+        hymenium::sweeper::Sweeper::start(db_path.clone()).context("failed to start sweeper")?;
     WorkflowStore::open(&db_path)
         .with_context(|| format!("could not open workflow store at {}", db_path.display()))
 }
