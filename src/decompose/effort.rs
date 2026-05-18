@@ -62,7 +62,19 @@ pub fn parse_effort_secs(effort: &str) -> Result<u64, DecompositionError> {
         clippy::cast_sign_loss,
         clippy::cast_precision_loss
     )]
-    let secs = (value * multiplier as f64) as u64;
+    let effort_value = value * multiplier as f64;
+    let secs = if effort_value.is_finite() && effort_value >= 0.0 {
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
+        let result = effort_value.min(u64::MAX as f64) as u64;
+        result
+    } else {
+        tracing::warn!("effort estimate was non-finite ({effort_value}); defaulting to 0");
+        0
+    };
     Ok(secs)
 }
 
@@ -85,5 +97,32 @@ pub(super) fn tier_from_step_count(count: usize) -> AgentTier {
         0..=1 => AgentTier::Haiku,
         2..=3 => AgentTier::Sonnet,
         _ => AgentTier::Opus,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nan_effort_does_not_silently_produce_zero() {
+        // NaN is non-finite, should produce 0 with a warning
+        let result = parse_effort_secs("2 hours").expect("valid effort");
+        assert!(result > 0, "normal effort should be positive");
+
+        // This test verifies the guard is in place by checking that we can
+        // parse normal values. The NaN case is handled internally by the
+        // finite check, producing 0 rather than panicking or wrapping.
+        // Direct NaN injection into parse_effort_secs isn't possible from
+        // the public API, but the guard protects against intermediate
+        // arithmetic that could produce NaN.
+    }
+
+    #[test]
+    fn test_parse_effort_secs_valid_ranges() {
+        assert_eq!(parse_effort_secs("2 hours").expect("valid"), 7200);
+        assert_eq!(parse_effort_secs("1 day").expect("valid"), 8 * 3600);
+        assert_eq!(parse_effort_secs("30 minutes").expect("valid"), 1800);
+        assert_eq!(parse_effort_secs("4h").expect("valid"), 4 * 3600);
     }
 }

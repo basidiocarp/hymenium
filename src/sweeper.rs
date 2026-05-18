@@ -579,18 +579,12 @@ impl Sweeper {
         heartbeat_timeout: Duration,
         gc_retention: Duration,
     ) -> Result<Self, SweeperError> {
-        // Open the registry once to verify connectivity before spawning.
-        let registry = RuntimeRegistry::open(&db_path)?;
-
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
 
         let handle = std::thread::Builder::new()
             .name("hymenium-sweeper".to_string())
             .spawn(move || {
-                // The registry was opened in this thread's context.
-                // Re-bind so the borrow checker is satisfied.
-                drop(registry); // close the check connection
                 let registry = match RuntimeRegistry::open(&db_path) {
                     Ok(r) => r,
                     Err(e) => {

@@ -480,13 +480,12 @@ impl WorkflowInstance {
     ///
     /// Panics if there is no current phase (programming error — call only on active workflows).
     pub fn record_tool_failure(&mut self, ceiling: u32) -> WorkflowEngineResult<bool> {
-        let phase_id = self
-            .current_phase()
-            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?
-            .phase_id
-            .clone();
+        let phase = self
+            .current_phase_mut()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
 
-        let phase_status = self.current_phase().unwrap().status.clone();
+        let phase_id = phase.phase_id.clone();
+        let phase_status = phase.status.clone();
 
         if phase_status != PhaseStatus::Active {
             return Err(WorkflowError::StateError(format!(
@@ -494,7 +493,6 @@ impl WorkflowInstance {
             )));
         }
 
-        let phase = self.current_phase_mut().unwrap();
         phase.tool_failure_count = phase.tool_failure_count.saturating_add(1);
         let hit_ceiling = phase.tool_failure_count >= ceiling;
 
@@ -530,13 +528,12 @@ impl WorkflowInstance {
     ///
     /// Panics if there is no current phase (programming error — call only on active workflows).
     pub fn record_request(&mut self, ceiling: u32) -> WorkflowEngineResult<bool> {
-        let phase_id = self
-            .current_phase()
-            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?
-            .phase_id
-            .clone();
+        let phase = self
+            .current_phase_mut()
+            .ok_or_else(|| WorkflowError::StateError("no current phase".to_string()))?;
 
-        let phase_status = self.current_phase().unwrap().status.clone();
+        let phase_id = phase.phase_id.clone();
+        let phase_status = phase.status.clone();
 
         if phase_status != PhaseStatus::Active {
             return Err(WorkflowError::StateError(format!(
@@ -544,7 +541,6 @@ impl WorkflowInstance {
             )));
         }
 
-        let phase = self.current_phase_mut().unwrap();
         phase.request_count = phase.request_count.saturating_add(1);
         let hit_ceiling = phase.request_count >= ceiling;
 
