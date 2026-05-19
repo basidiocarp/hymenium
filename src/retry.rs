@@ -364,427 +364,413 @@ mod tests {
         }
     }
 
-    // -- decide_recovery tests ------------------------------------------------
+    mod basic_recovery {
+        use super::*;
 
-    #[test]
-    fn first_stall_retries_plain() {
-        let signal = stalled_signal(StallReason::NoCodeDiff);
-        let policy = RetryPolicy::default();
-        let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
+        #[test]
+        fn first_stall_retries_plain() {
+            let signal = stalled_signal(StallReason::NoCodeDiff);
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
 
-        match action {
-            RecoveryAction::Retry {
-                narrowed_scope,
-                new_tier,
-            } => {
-                assert!(narrowed_scope.is_none());
-                assert!(new_tier.is_none());
+            match action {
+                RecoveryAction::Retry {
+                    narrowed_scope,
+                    new_tier,
+                } => {
+                    assert!(narrowed_scope.is_none());
+                    assert!(new_tier.is_none());
+                }
+                other => panic!("expected Retry, got {other:?}"),
             }
-            other => panic!("expected Retry, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn second_stall_narrows_scope() {
-        let signal = stalled_signal(StallReason::NoCodeDiff);
-        let policy = RetryPolicy::default(); // narrow_scope_on_retry = true
-        let action = decide_recovery(&signal, 1, &policy, &AgentTier::Sonnet);
-
-        match action {
-            RecoveryAction::Retry { narrowed_scope, .. } => {
-                assert!(
-                    narrowed_scope.is_some(),
-                    "expected narrowed scope on second retry"
-                );
-            }
-            other => panic!("expected Retry, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn third_stall_escalates() {
-        let signal = stalled_signal(StallReason::NoCodeDiff);
-        let policy = RetryPolicy::default(); // max_retries = 2
-        let action = decide_recovery(&signal, 2, &policy, &AgentTier::Sonnet);
-
-        assert!(matches!(action, RecoveryAction::Escalate { .. }));
-    }
-
-    #[test]
-    fn heartbeat_timeout_retries_immediately() {
-        let signal = stalled_signal(StallReason::HeartbeatTimeout);
-        let policy = RetryPolicy::default();
-        let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
-
-        assert!(matches!(action, RecoveryAction::Retry { .. }));
-    }
-
-    #[test]
-    fn heartbeat_timeout_escalates_at_limit() {
-        let signal = stalled_signal(StallReason::HeartbeatTimeout);
-        let policy = RetryPolicy::default();
-        let action = decide_recovery(&signal, 2, &policy, &AgentTier::Sonnet);
-
-        assert!(matches!(action, RecoveryAction::Escalate { .. }));
-    }
-
-    #[test]
-    fn status_chatter_retries_with_narrowed_scope() {
-        let signal = stalled_signal(StallReason::StatusChatterOnly);
-        let policy = RetryPolicy::default();
-        let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
-
-        match action {
-            RecoveryAction::Retry { narrowed_scope, .. } => {
-                assert!(narrowed_scope.is_some());
-            }
-            other => panic!("expected Retry, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn failed_signal_retries_under_limit() {
-        let signal = ProgressSignal::Failed {
-            phase_id: "implement".to_string(),
-            error: "canopy task failed".to_string(),
-        };
-        let policy = RetryPolicy::default();
-        let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
-        assert!(matches!(action, RecoveryAction::Retry { .. }));
-    }
-
-    #[test]
-    fn failed_signal_escalates_at_limit() {
-        let signal = ProgressSignal::Failed {
-            phase_id: "implement".to_string(),
-            error: "canopy task failed".to_string(),
-        };
-        let policy = RetryPolicy::default();
-        let action = decide_recovery(&signal, 2, &policy, &AgentTier::Sonnet);
-        assert!(matches!(action, RecoveryAction::Escalate { .. }));
-    }
-
-    #[test]
-    fn healthy_signal_cancels() {
-        let signal = ProgressSignal::Healthy {
-            phase_id: "implement".to_string(),
-            last_activity: Utc::now(),
-        };
-        let policy = RetryPolicy::default();
-        let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
-        assert!(matches!(action, RecoveryAction::Cancel { .. }));
-    }
-
-    #[test]
-    fn phase_complete_cancels() {
-        let signal = ProgressSignal::PhaseComplete {
-            phase_id: "implement".to_string(),
-        };
-        let policy = RetryPolicy::default();
-        let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
-        assert!(matches!(action, RecoveryAction::Cancel { .. }));
-    }
-
-    #[test]
-    fn gate_satisfied_cancels() {
-        let signal = ProgressSignal::GateSatisfied {
-            gate: "code_diff_exists".to_string(),
-        };
-        let policy = RetryPolicy::default();
-        let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
-        assert!(matches!(action, RecoveryAction::Cancel { .. }));
-    }
-
-    #[test]
-    fn paste_marker_progress_follows_progressive_recovery() {
-        let signal = stalled_signal(StallReason::NoPasteMarkerProgress);
-        let policy = RetryPolicy::default();
-
-        // First: plain retry
-        let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
-        assert!(matches!(
-            action,
-            RecoveryAction::Retry {
-                narrowed_scope: None,
-                ..
-            }
-        ));
-
-        // Second: narrowed scope
-        let action = decide_recovery(&signal, 1, &policy, &AgentTier::Sonnet);
-        match action {
-            RecoveryAction::Retry { narrowed_scope, .. } => {
-                assert!(narrowed_scope.is_some());
-            }
-            other => panic!("expected Retry, got {other:?}"),
         }
 
-        // Third: escalate
-        let action = decide_recovery(&signal, 2, &policy, &AgentTier::Sonnet);
-        assert!(matches!(action, RecoveryAction::Escalate { .. }));
-    }
+        #[test]
+        fn second_stall_narrows_scope() {
+            let signal = stalled_signal(StallReason::NoCodeDiff);
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 1, &policy, &AgentTier::Sonnet);
 
-    // -- next_tier tests ------------------------------------------------------
-
-    #[test]
-    fn tier_escalation_chain() {
-        assert_eq!(next_tier(&AgentTier::Haiku), AgentTier::Sonnet);
-        assert_eq!(next_tier(&AgentTier::Sonnet), AgentTier::Opus);
-        assert_eq!(next_tier(&AgentTier::Opus), AgentTier::Opus);
-        assert_eq!(next_tier(&AgentTier::Any), AgentTier::Sonnet);
-    }
-
-    // -- RetryPolicy defaults -------------------------------------------------
-
-    #[test]
-    fn default_policy_values() {
-        let policy = RetryPolicy::default();
-        assert_eq!(policy.max_retries, 2);
-        assert!(policy.narrow_scope_on_retry);
-        assert!(!policy.escalate_tier_on_retry);
-    }
-
-    // -- decide_recovery_typed -----------------------------------------------
-
-    fn policy() -> RetryPolicy {
-        RetryPolicy::default() // max_retries = 2
-    }
-
-    fn typed(kind: FailureKind) -> TypedFailure {
-        TypedFailure::new(kind)
-    }
-
-    #[test]
-    fn spec_ambiguity_always_escalates() {
-        for count in [0, 1, 2, 5] {
-            let action =
-                decide_recovery_typed(&typed(FailureKind::SpecAmbiguity), count, &policy());
-            assert!(
-                matches!(action, RecoveryAction::Escalate { .. }),
-                "expected Escalate for SpecAmbiguity at retry {count}"
-            );
-        }
-    }
-
-    #[test]
-    fn contract_mismatch_always_escalates() {
-        for count in [0, 1, 3] {
-            let action =
-                decide_recovery_typed(&typed(FailureKind::ContractMismatch), count, &policy());
-            assert!(
-                matches!(action, RecoveryAction::Escalate { .. }),
-                "expected Escalate for ContractMismatch at retry {count}"
-            );
-        }
-    }
-
-    #[test]
-    fn scope_violation_escalates_immediately() {
-        let action = decide_recovery_typed(&typed(FailureKind::ScopeViolation), 0, &policy());
-        assert!(matches!(action, RecoveryAction::Escalate { .. }));
-    }
-
-    #[test]
-    fn task_too_large_retries_with_narrowed_scope_first() {
-        let action = decide_recovery_typed(&typed(FailureKind::TaskTooLarge), 0, &policy());
-        match action {
-            RecoveryAction::Retry { narrowed_scope, .. } => {
-                assert!(
-                    narrowed_scope.is_some(),
-                    "TaskTooLarge first retry must include narrowed_scope"
-                );
-            }
-            other => panic!("expected Retry, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn task_too_large_escalates_after_first_retry() {
-        let action = decide_recovery_typed(&typed(FailureKind::TaskTooLarge), 1, &policy());
-        assert!(matches!(action, RecoveryAction::Escalate { .. }));
-    }
-
-    #[test]
-    fn missing_dependency_cancels() {
-        let action = decide_recovery_typed(&typed(FailureKind::MissingDependency), 0, &policy());
-        assert!(matches!(action, RecoveryAction::Cancel { .. }));
-    }
-
-    #[test]
-    fn execution_incomplete_retries_within_limit() {
-        let action = decide_recovery_typed(&typed(FailureKind::ExecutionIncomplete), 0, &policy());
-        assert!(matches!(action, RecoveryAction::Retry { .. }));
-
-        let action = decide_recovery_typed(&typed(FailureKind::ExecutionIncomplete), 1, &policy());
-        assert!(matches!(action, RecoveryAction::Retry { .. }));
-    }
-
-    #[test]
-    fn execution_incomplete_escalates_at_limit() {
-        // max_retries default is 2
-        let action = decide_recovery_typed(&typed(FailureKind::ExecutionIncomplete), 2, &policy());
-        assert!(matches!(action, RecoveryAction::Escalate { .. }));
-    }
-
-    #[test]
-    fn minor_defect_retries_while_under_budget() {
-        // default policy has max_retries=2; both retry_count=0 and retry_count=1 should Retry
-        for count in [0, 1] {
-            let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), count, &policy());
             match action {
                 RecoveryAction::Retry { narrowed_scope, .. } => {
-                    assert!(
-                        narrowed_scope.is_none(),
-                        "MinorDefect repair retry should not narrow scope"
-                    );
+                    assert!(narrowed_scope.is_some(), "expected narrowed scope on second retry");
                 }
-                other => panic!("retry_count={count}: expected Retry, got {other:?}"),
+                other => panic!("expected Retry, got {other:?}"),
             }
         }
-    }
 
-    #[test]
-    fn minor_defect_escalates_when_budget_exhausted() {
-        // max_retries=1: retry_count=1 should escalate
-        let policy = RetryPolicy {
-            max_retries: 1,
-            ..RetryPolicy::default()
-        };
-        let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 1, &policy);
-        assert!(matches!(action, RecoveryAction::Escalate { .. }));
-    }
-
-    #[test]
-    fn minor_defect_respects_higher_max_retries() {
-        // max_retries=3: retry_count=1 should still retry
-        let policy = RetryPolicy {
-            max_retries: 3,
-            ..RetryPolicy::default()
-        };
-        let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 1, &policy);
-        assert!(
-            matches!(action, RecoveryAction::Retry { .. }),
-            "MinorDefect should retry when retry_count < max_retries"
-        );
-    }
-
-    // -- escalate_tier_on_retry -----------------------------------------------
-
-    #[test]
-    fn tier_escalation_on_retry_when_enabled() {
-        let signal = stalled_signal(StallReason::NoCodeDiff);
-        let policy = RetryPolicy {
-            max_retries: 3,
-            narrow_scope_on_retry: true,
-            escalate_tier_on_retry: true,
-        };
-        let action = decide_recovery(&signal, 1, &policy, &AgentTier::Sonnet);
-        match action {
-            RecoveryAction::Retry { new_tier, .. } => {
-                assert_eq!(new_tier, Some(AgentTier::Opus));
-            }
-            other => panic!("expected Retry with tier escalation, got {other:?}"),
+        #[test]
+        fn third_stall_escalates() {
+            let signal = stalled_signal(StallReason::NoCodeDiff);
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 2, &policy, &AgentTier::Sonnet);
+            assert!(matches!(action, RecoveryAction::Escalate { .. }));
         }
-    }
 
-    // -- max_retries = 0 escalates immediately --------------------------------
-
-    #[test]
-    fn zero_max_retries_escalates_immediately() {
-        let policy = RetryPolicy {
-            max_retries: 0,
-            ..RetryPolicy::default()
-        };
-        for reason in [
-            StallReason::NoCodeDiff,
-            StallReason::HeartbeatTimeout,
-            StallReason::NoPasteMarkerProgress,
-            StallReason::StatusChatterOnly,
-        ] {
-            let signal = stalled_signal(reason);
+        #[test]
+        fn heartbeat_timeout_retries_immediately() {
+            let signal = stalled_signal(StallReason::HeartbeatTimeout);
+            let policy = RetryPolicy::default();
             let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
+            assert!(matches!(action, RecoveryAction::Retry { .. }));
+        }
+
+        #[test]
+        fn heartbeat_timeout_escalates_at_limit() {
+            let signal = stalled_signal(StallReason::HeartbeatTimeout);
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 2, &policy, &AgentTier::Sonnet);
+            assert!(matches!(action, RecoveryAction::Escalate { .. }));
+        }
+
+        #[test]
+        fn status_chatter_retries_with_narrowed_scope() {
+            let signal = stalled_signal(StallReason::StatusChatterOnly);
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
+
+            match action {
+                RecoveryAction::Retry { narrowed_scope, .. } => {
+                    assert!(narrowed_scope.is_some());
+                }
+                other => panic!("expected Retry, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn failed_signal_retries_under_limit() {
+            let signal = ProgressSignal::Failed {
+                phase_id: "implement".to_string(),
+                error: "canopy task failed".to_string(),
+            };
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
+            assert!(matches!(action, RecoveryAction::Retry { .. }));
+        }
+
+        #[test]
+        fn failed_signal_escalates_at_limit() {
+            let signal = ProgressSignal::Failed {
+                phase_id: "implement".to_string(),
+                error: "canopy task failed".to_string(),
+            };
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 2, &policy, &AgentTier::Sonnet);
+            assert!(matches!(action, RecoveryAction::Escalate { .. }));
+        }
+
+        #[test]
+        fn healthy_signal_cancels() {
+            let signal = ProgressSignal::Healthy {
+                phase_id: "implement".to_string(),
+                last_activity: Utc::now(),
+            };
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
+            assert!(matches!(action, RecoveryAction::Cancel { .. }));
+        }
+
+        #[test]
+        fn phase_complete_cancels() {
+            let signal = ProgressSignal::PhaseComplete {
+                phase_id: "implement".to_string(),
+            };
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
+            assert!(matches!(action, RecoveryAction::Cancel { .. }));
+        }
+
+        #[test]
+        fn gate_satisfied_cancels() {
+            let signal = ProgressSignal::GateSatisfied {
+                gate: "code_diff_exists".to_string(),
+            };
+            let policy = RetryPolicy::default();
+            let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
+            assert!(matches!(action, RecoveryAction::Cancel { .. }));
+        }
+
+        #[test]
+        fn paste_marker_progress_follows_progressive_recovery() {
+            let signal = stalled_signal(StallReason::NoPasteMarkerProgress);
+            let policy = RetryPolicy::default();
+
+            let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
+            assert!(matches!(
+                action,
+                RecoveryAction::Retry {
+                    narrowed_scope: None,
+                    ..
+                }
+            ));
+
+            let action = decide_recovery(&signal, 1, &policy, &AgentTier::Sonnet);
+            match action {
+                RecoveryAction::Retry { narrowed_scope, .. } => {
+                    assert!(narrowed_scope.is_some());
+                }
+                other => panic!("expected Retry, got {other:?}"),
+            }
+
+            let action = decide_recovery(&signal, 2, &policy, &AgentTier::Sonnet);
+            assert!(matches!(action, RecoveryAction::Escalate { .. }));
+        }
+
+        #[test]
+        fn default_policy_values() {
+            let policy = RetryPolicy::default();
+            assert_eq!(policy.max_retries, 2);
+            assert!(policy.narrow_scope_on_retry);
+            assert!(!policy.escalate_tier_on_retry);
+        }
+
+        #[test]
+        fn zero_max_retries_escalates_immediately() {
+            let policy = RetryPolicy {
+                max_retries: 0,
+                ..RetryPolicy::default()
+            };
+            for reason in [
+                StallReason::NoCodeDiff,
+                StallReason::HeartbeatTimeout,
+                StallReason::NoPasteMarkerProgress,
+                StallReason::StatusChatterOnly,
+            ] {
+                let signal = stalled_signal(reason);
+                let action = decide_recovery(&signal, 0, &policy, &AgentTier::Sonnet);
+                assert!(
+                    matches!(action, RecoveryAction::Escalate { .. }),
+                    "expected Escalate for {signal:?}"
+                );
+            }
+        }
+    }
+
+    mod typed_failures {
+        use super::*;
+
+        fn policy() -> RetryPolicy {
+            RetryPolicy::default()
+        }
+
+        fn typed(kind: FailureKind) -> TypedFailure {
+            TypedFailure::new(kind)
+        }
+
+        #[test]
+        fn spec_ambiguity_always_escalates() {
+            for count in [0, 1, 2, 5] {
+                let action =
+                    decide_recovery_typed(&typed(FailureKind::SpecAmbiguity), count, &policy());
+                assert!(
+                    matches!(action, RecoveryAction::Escalate { .. }),
+                    "expected Escalate for SpecAmbiguity at retry {count}"
+                );
+            }
+        }
+
+        #[test]
+        fn contract_mismatch_always_escalates() {
+            for count in [0, 1, 3] {
+                let action =
+                    decide_recovery_typed(&typed(FailureKind::ContractMismatch), count, &policy());
+                assert!(
+                    matches!(action, RecoveryAction::Escalate { .. }),
+                    "expected Escalate for ContractMismatch at retry {count}"
+                );
+            }
+        }
+
+        #[test]
+        fn scope_violation_escalates_immediately() {
+            let action = decide_recovery_typed(&typed(FailureKind::ScopeViolation), 0, &policy());
+            assert!(matches!(action, RecoveryAction::Escalate { .. }));
+        }
+
+        #[test]
+        fn task_too_large_retries_with_narrowed_scope_first() {
+            let action = decide_recovery_typed(&typed(FailureKind::TaskTooLarge), 0, &policy());
+            match action {
+                RecoveryAction::Retry { narrowed_scope, .. } => {
+                    assert!(narrowed_scope.is_some(), "TaskTooLarge first retry must include narrowed_scope");
+                }
+                other => panic!("expected Retry, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn task_too_large_escalates_after_first_retry() {
+            let action = decide_recovery_typed(&typed(FailureKind::TaskTooLarge), 1, &policy());
+            assert!(matches!(action, RecoveryAction::Escalate { .. }));
+        }
+
+        #[test]
+        fn missing_dependency_cancels() {
+            let action =
+                decide_recovery_typed(&typed(FailureKind::MissingDependency), 0, &policy());
+            assert!(matches!(action, RecoveryAction::Cancel { .. }));
+        }
+
+        #[test]
+        fn execution_incomplete_retries_within_limit() {
+            let action =
+                decide_recovery_typed(&typed(FailureKind::ExecutionIncomplete), 0, &policy());
+            assert!(matches!(action, RecoveryAction::Retry { .. }));
+
+            let action =
+                decide_recovery_typed(&typed(FailureKind::ExecutionIncomplete), 1, &policy());
+            assert!(matches!(action, RecoveryAction::Retry { .. }));
+        }
+
+        #[test]
+        fn execution_incomplete_escalates_at_limit() {
+            let action =
+                decide_recovery_typed(&typed(FailureKind::ExecutionIncomplete), 2, &policy());
+            assert!(matches!(action, RecoveryAction::Escalate { .. }));
+        }
+
+        #[test]
+        fn minor_defect_retries_while_under_budget() {
+            for count in [0, 1] {
+                let action =
+                    decide_recovery_typed(&typed(FailureKind::MinorDefect), count, &policy());
+                match action {
+                    RecoveryAction::Retry { narrowed_scope, .. } => {
+                        assert!(
+                            narrowed_scope.is_none(),
+                            "MinorDefect repair retry should not narrow scope"
+                        );
+                    }
+                    other => panic!("retry_count={count}: expected Retry, got {other:?}"),
+                }
+            }
+        }
+
+        #[test]
+        fn minor_defect_escalates_when_budget_exhausted() {
+            let policy = RetryPolicy {
+                max_retries: 1,
+                ..RetryPolicy::default()
+            };
+            let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 1, &policy);
+            assert!(matches!(action, RecoveryAction::Escalate { .. }));
+        }
+
+        #[test]
+        fn minor_defect_respects_higher_max_retries() {
+            let policy = RetryPolicy {
+                max_retries: 3,
+                ..RetryPolicy::default()
+            };
+            let action = decide_recovery_typed(&typed(FailureKind::MinorDefect), 1, &policy);
             assert!(
-                matches!(action, RecoveryAction::Escalate { .. }),
-                "expected Escalate for {signal:?}"
+                matches!(action, RecoveryAction::Retry { .. }),
+                "MinorDefect should retry when retry_count < max_retries"
             );
         }
     }
 
-    // -- StatusChatterOnly via handle_signal ----------------------------------
+    mod tier_escalation {
+        use super::*;
 
-    #[test]
-    fn status_chatter_via_handle_signal_returns_retry() {
-        use crate::store::WorkflowStore;
-        use crate::workflow::WorkflowId;
-        use crate::workflow::engine::PhaseStatus;
-        use crate::workflow::engine::WorkflowInstance;
-        use crate::workflow::template::impl_audit_default;
+        #[test]
+        fn tier_escalation_chain() {
+            assert_eq!(next_tier(&AgentTier::Haiku), AgentTier::Sonnet);
+            assert_eq!(next_tier(&AgentTier::Sonnet), AgentTier::Opus);
+            assert_eq!(next_tier(&AgentTier::Opus), AgentTier::Opus);
+            assert_eq!(next_tier(&AgentTier::Any), AgentTier::Sonnet);
+        }
 
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-chatter".to_string()),
-            template,
-            "/test/handoff.md",
-        );
-        wf.phase_states[0].status = PhaseStatus::Active;
-        wf.phase_states[0].started_at = Some(Utc::now());
-
-        let store = WorkflowStore::open(":memory:").expect("open in-memory store");
-        store.insert_workflow(&wf).expect("insert workflow");
-
-        let signal = ProgressSignal::Stalled {
-            phase_id: "implement".to_string(),
-            since: Utc::now(),
-            reason: StallReason::StatusChatterOnly,
-        };
-        let policy = RetryPolicy::default();
-
-        let action = crate::monitor::handle_signal(&signal, &mut wf, 0, &policy, &store)
-            .expect("should succeed");
-        match action {
-            RecoveryAction::Retry { narrowed_scope, .. } => {
-                assert!(
-                    narrowed_scope.is_some(),
-                    "StatusChatterOnly should narrow scope"
-                );
+        #[test]
+        fn tier_escalation_on_retry_when_enabled() {
+            let signal = stalled_signal(StallReason::NoCodeDiff);
+            let policy = RetryPolicy {
+                max_retries: 3,
+                narrow_scope_on_retry: true,
+                escalate_tier_on_retry: true,
+            };
+            let action = decide_recovery(&signal, 1, &policy, &AgentTier::Sonnet);
+            match action {
+                RecoveryAction::Retry { new_tier, .. } => {
+                    assert_eq!(new_tier, Some(AgentTier::Opus));
+                }
+                other => panic!("expected Retry with tier escalation, got {other:?}"),
             }
-            other => panic!("expected Retry, got {other:?}"),
+        }
+
+        #[test]
+        fn tier_escalation_from_opus() {
+            let signal = stalled_signal(StallReason::NoCodeDiff);
+            let policy = RetryPolicy {
+                max_retries: 3,
+                narrow_scope_on_retry: true,
+                escalate_tier_on_retry: true,
+            };
+            let action = decide_recovery(&signal, 1, &policy, &AgentTier::Opus);
+            match action {
+                RecoveryAction::Retry { new_tier, .. } => {
+                    assert_eq!(new_tier, Some(AgentTier::Opus));
+                }
+                other => panic!("expected Retry with tier escalation, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn tier_escalation_from_haiku() {
+            let signal = stalled_signal(StallReason::NoCodeDiff);
+            let policy = RetryPolicy {
+                max_retries: 3,
+                narrow_scope_on_retry: true,
+                escalate_tier_on_retry: true,
+            };
+            let action = decide_recovery(&signal, 1, &policy, &AgentTier::Haiku);
+            match action {
+                RecoveryAction::Retry { new_tier, .. } => {
+                    assert_eq!(new_tier, Some(AgentTier::Sonnet));
+                }
+                other => panic!("expected Retry with tier escalation, got {other:?}"),
+            }
         }
     }
 
-    #[test]
-    fn tier_escalation_from_opus() {
-        let signal = stalled_signal(StallReason::NoCodeDiff);
-        let policy = RetryPolicy {
-            max_retries: 3,
-            narrow_scope_on_retry: true,
-            escalate_tier_on_retry: true,
-        };
-        // Starting from Opus should escalate to Opus (ceiling)
-        let action = decide_recovery(&signal, 1, &policy, &AgentTier::Opus);
-        match action {
-            RecoveryAction::Retry { new_tier, .. } => {
-                assert_eq!(new_tier, Some(AgentTier::Opus));
-            }
-            other => panic!("expected Retry with tier escalation, got {other:?}"),
-        }
-    }
+    mod integration {
+        use super::*;
 
-    #[test]
-    fn tier_escalation_from_haiku() {
-        let signal = stalled_signal(StallReason::NoCodeDiff);
-        let policy = RetryPolicy {
-            max_retries: 3,
-            narrow_scope_on_retry: true,
-            escalate_tier_on_retry: true,
-        };
-        // Starting from Haiku should escalate to Sonnet
-        let action = decide_recovery(&signal, 1, &policy, &AgentTier::Haiku);
-        match action {
-            RecoveryAction::Retry { new_tier, .. } => {
-                assert_eq!(new_tier, Some(AgentTier::Sonnet));
+        #[test]
+        fn status_chatter_via_handle_signal_returns_retry() {
+            use crate::store::WorkflowStore;
+            use crate::workflow::WorkflowId;
+            use crate::workflow::engine::PhaseStatus;
+            use crate::workflow::engine::WorkflowInstance;
+            use crate::workflow::template::impl_audit_default;
+
+            let template = impl_audit_default();
+            let mut wf = WorkflowInstance::new(
+                WorkflowId("test-chatter".to_string()),
+                template,
+                "/test/handoff.md",
+            );
+            wf.phase_states[0].status = PhaseStatus::Active;
+            wf.phase_states[0].started_at = Some(Utc::now());
+
+            let store = WorkflowStore::open(":memory:").expect("open in-memory store");
+            store.insert_workflow(&wf).expect("insert workflow");
+
+            let signal = ProgressSignal::Stalled {
+                phase_id: "implement".to_string(),
+                since: Utc::now(),
+                reason: StallReason::StatusChatterOnly,
+            };
+            let policy = RetryPolicy::default();
+
+            let action = crate::monitor::handle_signal(&signal, &mut wf, 0, &policy, &store)
+                .expect("should succeed");
+            match action {
+                RecoveryAction::Retry { narrowed_scope, .. } => {
+                    assert!(narrowed_scope.is_some(), "StatusChatterOnly should narrow scope");
+                }
+                other => panic!("expected Retry, got {other:?}"),
             }
-            other => panic!("expected Retry with tier escalation, got {other:?}"),
         }
     }
 }

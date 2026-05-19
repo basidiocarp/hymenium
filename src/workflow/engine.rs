@@ -871,399 +871,270 @@ mod tests {
     use crate::workflow::gate::MockGateEvaluator;
     use crate::workflow::template::impl_audit_default;
 
-    #[test]
-    fn test_create_workflow_instance() {
-        let template = impl_audit_default();
-        let wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
+    fn make_wf(id: &str) -> WorkflowInstance {
+        WorkflowInstance::new(
+            WorkflowId(id.to_string()),
+            impl_audit_default(),
             "/path/to/handoff.md",
-        );
-
-        assert_eq!(wf.workflow_id, WorkflowId("test-123".to_string()));
-        assert_eq!(wf.status, WorkflowStatus::Pending);
-        assert_eq!(wf.current_phase_idx, 0);
-        assert_eq!(wf.phase_states.len(), 2);
-        assert_eq!(wf.phase_states[0].status, PhaseStatus::Pending);
+        )
     }
 
-    #[test]
-    fn test_start_phase() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
+    mod phase_lifecycle {
+        use super::*;
 
-        wf.start_phase().expect("should start phase");
-        assert_eq!(wf.status, WorkflowStatus::InProgress);
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
-        assert!(wf.current_phase().unwrap().started_at.is_some());
+        #[test]
+        fn create_workflow_instance() {
+            let wf = make_wf("test-123");
+            assert_eq!(wf.workflow_id, WorkflowId("test-123".to_string()));
+            assert_eq!(wf.status, WorkflowStatus::Pending);
+            assert_eq!(wf.current_phase_idx, 0);
+            assert_eq!(wf.phase_states.len(), 2);
+            assert_eq!(wf.phase_states[0].status, PhaseStatus::Pending);
+        }
+
+        #[test]
+        fn start_phase() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            assert_eq!(wf.status, WorkflowStatus::InProgress);
+            assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
+            assert!(wf.current_phase().unwrap().started_at.is_some());
+        }
+
+        #[test]
+        fn complete_phase() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            wf.complete_phase().expect("should complete phase");
+            assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Completed);
+            assert!(wf.current_phase().unwrap().completed_at.is_some());
+        }
+
+        #[test]
+        fn fail_phase() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            wf.fail_phase("test failure").expect("should fail phase");
+            assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
+            assert_eq!(wf.status, WorkflowStatus::Failed);
+        }
+
+        #[test]
+        fn cannot_start_non_pending_phase() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            assert!(wf.start_phase().is_err());
+        }
+
+        #[test]
+        fn cannot_complete_non_active_phase() {
+            let mut wf = make_wf("test-123");
+            assert!(wf.complete_phase().is_err());
+        }
+
+        #[test]
+        fn phase_duration() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            wf.complete_phase().expect("should complete phase");
+            let duration = wf.phase_duration(0).expect("should have duration");
+            assert!(duration.num_milliseconds() >= 0);
+        }
     }
 
-    #[test]
-    fn test_complete_phase() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
+    mod gate_transitions {
+        use super::*;
 
-        wf.start_phase().expect("should start phase");
-        wf.complete_phase().expect("should complete phase");
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Completed);
-        assert!(wf.current_phase().unwrap().completed_at.is_some());
+        #[test]
+        fn advance_with_gates_satisfied() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            wf.complete_phase().expect("should complete phase");
+
+            let evaluator = MockGateEvaluator::new()
+                .set_condition("code_diff_exists", true)
+                .set_condition("verification_passed", true);
+
+            let transition = wf.advance(&evaluator).expect("should advance");
+            assert_eq!(transition.from_phase_id, "implement");
+            assert_eq!(transition.to_phase_id, "audit");
+            assert_eq!(wf.current_phase_idx, 1);
+            assert_eq!(wf.status, WorkflowStatus::Dispatched);
+        }
+
+        #[test]
+        fn advance_blocked_when_gates_not_satisfied() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            wf.complete_phase().expect("should complete phase");
+
+            let evaluator = MockGateEvaluator::new();
+            assert!(wf.advance(&evaluator).is_err());
+            assert_eq!(wf.current_phase_idx, 0);
+        }
+
+        #[test]
+        fn can_advance_checks_gates() {
+            let wf = make_wf("test-123");
+
+            let passing = MockGateEvaluator::new()
+                .set_condition("code_diff_exists", true)
+                .set_condition("verification_passed", true);
+            assert!(wf.can_advance(&passing).expect("should evaluate"));
+
+            let failing = MockGateEvaluator::new();
+            assert!(!wf.can_advance(&failing).expect("should evaluate"));
+        }
     }
 
-    #[test]
-    fn test_advance_with_gates_satisfied() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
+    mod user_handoff {
+        use super::*;
 
-        wf.start_phase().expect("should start phase");
-        wf.complete_phase().expect("should complete phase");
+        #[test]
+        fn handoff_to_user_pauses_workflow() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            wf.handoff_to_user_phase("review this", false)
+                .expect("should handoff to user");
 
-        // Create evaluator where exit gates of implement phase are satisfied
-        let evaluator = MockGateEvaluator::new()
-            .set_condition("code_diff_exists", true)
-            .set_condition("verification_passed", true);
+            assert_eq!(
+                wf.current_phase().unwrap().status,
+                PhaseStatus::AwaitingUserInput
+            );
+            assert_eq!(wf.status, WorkflowStatus::AwaitingUserInput);
+            assert_eq!(
+                wf.current_phase().unwrap().pending_message.as_deref(),
+                Some("review this")
+            );
+        }
 
-        let transition = wf.advance(&evaluator).expect("should advance");
-        assert_eq!(transition.from_phase_id, "implement");
-        assert_eq!(transition.to_phase_id, "audit");
-        assert_eq!(wf.current_phase_idx, 1);
-        assert_eq!(wf.status, WorkflowStatus::Dispatched);
+        #[test]
+        fn handoff_to_user_breakout_terminates_workflow() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            wf.handoff_to_user_phase("stopping", true)
+                .expect("should handoff to user");
+
+            assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
+            assert_eq!(wf.status, WorkflowStatus::UserTerminated);
+        }
+
+        #[test]
+        fn resume_from_user_input_restores_active_state() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
+            wf.handoff_to_user_phase("review", false)
+                .expect("should handoff to user");
+            wf.resume_from_user_input()
+                .expect("should resume from user input");
+
+            assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
+            assert_eq!(wf.status, WorkflowStatus::InProgress);
+            assert_eq!(wf.current_phase().unwrap().pending_message, None);
+        }
+
+        #[test]
+        fn resume_fails_when_not_paused() {
+            let mut wf = make_wf("test-123");
+            assert!(wf.resume_from_user_input().is_err());
+        }
     }
 
-    #[test]
-    fn test_advance_with_gates_not_satisfied() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
+    mod failure_ceiling {
+        use super::*;
 
-        wf.start_phase().expect("should start phase");
-        wf.complete_phase().expect("should complete phase");
+        #[test]
+        fn tool_failure_below_ceiling_stays_active() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
 
-        // Create evaluator where exit gates are NOT satisfied
-        let evaluator = MockGateEvaluator::new();
+            assert!(!wf.record_tool_failure(3).expect("record"));
+            assert_eq!(wf.current_phase().unwrap().tool_failure_count, 1);
+            assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
 
-        let result = wf.advance(&evaluator);
-        assert!(result.is_err());
-        assert_eq!(wf.current_phase_idx, 0); // Should still be at phase 0
-    }
+            assert!(!wf.record_tool_failure(3).expect("record"));
+            assert_eq!(wf.current_phase().unwrap().tool_failure_count, 2);
+            assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
+        }
 
-    #[test]
-    fn test_can_advance_checks_gates() {
-        let template = impl_audit_default();
-        let wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
+        #[test]
+        fn tool_failure_at_ceiling_fails_phase() {
+            let mut wf = make_wf("test-123");
+            wf.start_phase().expect("should start phase");
 
-        let passing_evaluator = MockGateEvaluator::new()
-            .set_condition("code_diff_exists", true)
-            .set_condition("verification_passed", true);
-
-        let can_advance = wf.can_advance(&passing_evaluator).expect("should evaluate");
-        assert!(can_advance);
-
-        let failing_evaluator = MockGateEvaluator::new();
-        let can_advance = wf.can_advance(&failing_evaluator).expect("should evaluate");
-        assert!(!can_advance);
-    }
-
-    #[test]
-    fn test_phase_duration() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        wf.start_phase().expect("should start phase");
-        wf.complete_phase().expect("should complete phase");
-
-        let duration = wf.phase_duration(0).expect("should have duration");
-        assert!(duration.num_milliseconds() >= 0);
-    }
-
-    #[test]
-    fn test_fail_phase() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        wf.start_phase().expect("should start phase");
-        wf.fail_phase("test failure").expect("should fail phase");
-
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
-        assert_eq!(wf.status, WorkflowStatus::Failed);
-    }
-
-    #[test]
-    fn test_cannot_start_non_pending_phase() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        wf.start_phase().expect("should start phase");
-        let result = wf.start_phase();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_cannot_complete_non_active_phase() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        let result = wf.complete_phase();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_workflow_status_display() {
-        assert_eq!(format!("{}", WorkflowStatus::Pending), "pending");
-        assert_eq!(format!("{}", WorkflowStatus::InProgress), "in_progress");
-        assert_eq!(
-            format!("{}", WorkflowStatus::BlockedOnGate),
-            "blocked_on_gate"
-        );
-        assert_eq!(
-            format!("{}", WorkflowStatus::AwaitingRepair),
-            "awaiting_repair"
-        );
-        assert_eq!(format!("{}", WorkflowStatus::Completed), "completed");
-        assert_eq!(
-            format!("{}", WorkflowStatus::AwaitingUserInput),
-            "awaiting_user_input"
-        );
-        assert_eq!(
-            format!("{}", WorkflowStatus::UserTerminated),
-            "user_terminated"
-        );
-    }
-
-    #[test]
-    fn test_phase_status_display() {
-        assert_eq!(format!("{}", PhaseStatus::Pending), "pending");
-        assert_eq!(format!("{}", PhaseStatus::Active), "active");
-        assert_eq!(format!("{}", PhaseStatus::Completed), "completed");
-        assert_eq!(
-            format!("{}", PhaseStatus::AwaitingUserInput),
-            "awaiting_user_input"
-        );
-    }
-
-    #[test]
-    fn test_handoff_to_user_no_breakout_pauses_workflow() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        wf.start_phase().expect("should start phase");
-        wf.handoff_to_user_phase("review this", false)
-            .expect("should handoff to user");
-
-        assert_eq!(
-            wf.current_phase().unwrap().status,
-            PhaseStatus::AwaitingUserInput
-        );
-        assert_eq!(wf.status, WorkflowStatus::AwaitingUserInput);
-        assert_eq!(
-            wf.current_phase().unwrap().pending_message.as_deref(),
-            Some("review this")
-        );
-    }
-
-    #[test]
-    fn test_handoff_to_user_breakout_terminates_workflow() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        wf.start_phase().expect("should start phase");
-        wf.handoff_to_user_phase("stopping", true)
-            .expect("should handoff to user");
-
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
-        assert_eq!(wf.status, WorkflowStatus::UserTerminated);
-    }
-
-    #[test]
-    fn test_resume_from_user_input_restores_active_state() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        wf.start_phase().expect("should start phase");
-        wf.handoff_to_user_phase("review", false)
-            .expect("should handoff to user");
-        wf.resume_from_user_input()
-            .expect("should resume from user input");
-
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
-        assert_eq!(wf.status, WorkflowStatus::InProgress);
-        assert_eq!(wf.current_phase().unwrap().pending_message, None);
-    }
-
-    #[test]
-    fn test_resume_fails_when_not_paused() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        let result = wf.resume_from_user_input();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_record_tool_failure_below_ceiling_returns_false() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        wf.start_phase().expect("should start phase");
-
-        let hit_ceiling = wf.record_tool_failure(3).expect("should record failure");
-        assert!(!hit_ceiling);
-        assert_eq!(wf.current_phase().unwrap().tool_failure_count, 1);
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
-
-        let hit_ceiling = wf
-            .record_tool_failure(3)
-            .expect("should record second failure");
-        assert!(!hit_ceiling);
-        assert_eq!(wf.current_phase().unwrap().tool_failure_count, 2);
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Active);
-    }
-
-    #[test]
-    fn test_record_tool_failure_at_ceiling_returns_true_and_fails_phase() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-123".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        wf.start_phase().expect("should start phase");
-
-        let hit_ceiling = wf.record_tool_failure(2).expect("should record failure");
-        assert!(!hit_ceiling);
-        assert_eq!(wf.current_phase().unwrap().tool_failure_count, 1);
-
-        let hit_ceiling = wf
-            .record_tool_failure(2)
-            .expect("should record second failure");
-        assert!(hit_ceiling);
-        assert_eq!(wf.current_phase().unwrap().tool_failure_count, 2);
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
-        assert_eq!(wf.status, WorkflowStatus::Failed);
-        assert!(
-            wf.current_phase()
+            assert!(!wf.record_tool_failure(2).expect("record"));
+            assert!(wf.record_tool_failure(2).expect("record"));
+            assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
+            assert_eq!(wf.status, WorkflowStatus::Failed);
+            assert!(wf
+                .current_phase()
                 .unwrap()
                 .failure_reason
                 .as_ref()
                 .unwrap()
-                .contains("ExceededFailureCeiling")
-        );
-    }
+                .contains("ExceededFailureCeiling"));
+        }
 
-    #[test]
-    fn test_record_request_at_ceiling_returns_true_and_fails_phase() {
-        let template = impl_audit_default();
-        let mut wf = WorkflowInstance::new(
-            WorkflowId("test-124".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
+        #[test]
+        fn request_at_ceiling_fails_phase() {
+            let mut wf = make_wf("test-124");
+            wf.start_phase().expect("should start phase");
 
-        wf.start_phase().expect("should start phase");
-
-        let hit_ceiling = wf.record_request(3).expect("should record request");
-        assert!(!hit_ceiling);
-        assert_eq!(wf.current_phase().unwrap().request_count, 1);
-
-        let hit_ceiling = wf.record_request(3).expect("should record second request");
-        assert!(!hit_ceiling);
-        assert_eq!(wf.current_phase().unwrap().request_count, 2);
-
-        let hit_ceiling = wf.record_request(3).expect("should record third request");
-        assert!(hit_ceiling);
-        assert_eq!(wf.current_phase().unwrap().request_count, 3);
-        assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
-        assert_eq!(wf.status, WorkflowStatus::Failed);
-        assert!(
-            wf.current_phase()
+            assert!(!wf.record_request(3).expect("record"));
+            assert!(!wf.record_request(3).expect("record"));
+            assert!(wf.record_request(3).expect("record"));
+            assert_eq!(wf.current_phase().unwrap().request_count, 3);
+            assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
+            assert!(wf
+                .current_phase()
                 .unwrap()
                 .failure_reason
                 .as_ref()
                 .unwrap()
-                .contains("ExceededRequestCeiling")
-        );
+                .contains("ExceededRequestCeiling"));
+        }
+
+        #[test]
+        fn effective_ceiling_inherits_template_default() {
+            let wf = make_wf("test-125");
+            assert_eq!(wf.effective_tool_failure_ceiling(), 10);
+            assert_eq!(wf.effective_request_ceiling(), 50);
+        }
+
+        #[test]
+        fn effective_ceiling_uses_per_phase_override() {
+            let mut template = impl_audit_default();
+            template.phases[0].max_tool_failure_per_phase = Some(3);
+            let wf = WorkflowInstance::new(
+                WorkflowId("test-126".to_string()),
+                template,
+                "/path/to/handoff.md",
+            );
+            assert_eq!(wf.effective_tool_failure_ceiling(), 3);
+            assert_eq!(wf.effective_request_ceiling(), 50);
+        }
     }
 
-    #[test]
-    fn test_effective_ceiling_inherits_template_default() {
-        let template = impl_audit_default();
-        let wf = WorkflowInstance::new(
-            WorkflowId("test-125".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
+    mod status_display {
+        use super::*;
 
-        assert_eq!(wf.effective_tool_failure_ceiling(), 10);
-        assert_eq!(wf.effective_request_ceiling(), 50);
-    }
+        #[test]
+        fn workflow_status_display() {
+            assert_eq!(format!("{}", WorkflowStatus::Pending), "pending");
+            assert_eq!(format!("{}", WorkflowStatus::InProgress), "in_progress");
+            assert_eq!(format!("{}", WorkflowStatus::BlockedOnGate), "blocked_on_gate");
+            assert_eq!(format!("{}", WorkflowStatus::AwaitingRepair), "awaiting_repair");
+            assert_eq!(format!("{}", WorkflowStatus::Completed), "completed");
+            assert_eq!(format!("{}", WorkflowStatus::AwaitingUserInput), "awaiting_user_input");
+            assert_eq!(format!("{}", WorkflowStatus::UserTerminated), "user_terminated");
+        }
 
-    #[test]
-    fn test_effective_ceiling_uses_per_phase_override() {
-        let mut template = impl_audit_default();
-        template.phases[0].max_tool_failure_per_phase = Some(3);
-
-        let wf = WorkflowInstance::new(
-            WorkflowId("test-126".to_string()),
-            template,
-            "/path/to/handoff.md",
-        );
-
-        assert_eq!(wf.effective_tool_failure_ceiling(), 3);
-        assert_eq!(wf.effective_request_ceiling(), 50);
+        #[test]
+        fn phase_status_display() {
+            assert_eq!(format!("{}", PhaseStatus::Pending), "pending");
+            assert_eq!(format!("{}", PhaseStatus::Active), "active");
+            assert_eq!(format!("{}", PhaseStatus::Completed), "completed");
+            assert_eq!(format!("{}", PhaseStatus::AwaitingUserInput), "awaiting_user_input");
+        }
     }
 }
