@@ -3,6 +3,7 @@
 //! Manages the lifecycle of handoff workflows, including template loading,
 //! phase transitions, and gate evaluation.
 
+pub mod dag;
 pub mod engine;
 pub mod gate;
 pub mod template;

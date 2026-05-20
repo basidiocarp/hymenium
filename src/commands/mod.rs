@@ -7,4 +7,5 @@ pub mod dispatch;
 pub mod fail;
 pub mod reconcile;
 pub mod resume;
+pub mod run;
 pub mod status;

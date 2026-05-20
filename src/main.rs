@@ -86,9 +86,26 @@ enum Commands {
         #[arg(value_name = "WORKFLOW_ID")]
         workflow_id: String,
     },
+
+    /// Run a DAG workflow from a YAML file
+    Run {
+        /// Path to the workflow YAML file.
+        #[arg(value_name = "PATH")]
+        workflow: PathBuf,
+
+        /// Additional environment variables passed to nodes.
+        /// Format: KEY=VALUE. Repeatable.
+        #[arg(long = "env", value_parser = parse_env_arg)]
+        env: Vec<(String, String)>,
+
+        /// Print node execution results as JSON to stdout.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -150,9 +167,36 @@ fn main() -> Result<()> {
             hymenium::commands::complete::run(&workflow_id, &store)
                 .with_context(|| format!("complete failed for {workflow_id}"))?;
         }
+
+        Commands::Run {
+            workflow,
+            env,
+            json,
+        } => {
+            let run_cmd = hymenium::commands::run::Run {
+                workflow,
+                env,
+                json,
+            };
+            run_cmd
+                .execute()
+                .await
+                .context("workflow execution failed")?;
+        }
     }
 
     Ok(())
+}
+
+/// Parse KEY=VALUE format for environment arguments.
+fn parse_env_arg(s: &str) -> Result<(String, String)> {
+    match s.split_once('=') {
+        Some((k, v)) => Ok((k.to_string(), v.to_string())),
+        None => Err(anyhow::anyhow!(
+            "invalid env format: '{}'. Expected KEY=VALUE",
+            s
+        )),
+    }
 }
 
 /// Open the workflow store, defaulting to the path from env or XDG conventions.
