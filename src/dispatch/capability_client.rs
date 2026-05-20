@@ -31,7 +31,7 @@ use super::{
 };
 #[cfg(unix)]
 use crate::dispatch::cli::libc_kill;
-use crate::dispatch::cli::{resolve_canopy_binary, CANOPY_ALLOWED_ENV, CANOPY_TIMEOUT};
+use crate::dispatch::cli::{CANOPY_ALLOWED_ENV, CANOPY_TIMEOUT, resolve_canopy_binary};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::Write as _;
