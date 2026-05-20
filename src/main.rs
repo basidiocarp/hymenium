@@ -196,8 +196,7 @@ fn parse_env_arg(s: &str) -> Result<(String, String)> {
     match s.split_once('=') {
         Some((k, v)) => Ok((k.to_string(), v.to_string())),
         None => Err(anyhow::anyhow!(
-            "invalid env format: '{}'. Expected KEY=VALUE",
-            s
+            "invalid env format: '{s}'. Expected KEY=VALUE"
         )),
     }
 }

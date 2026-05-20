@@ -45,7 +45,7 @@ fn validate_dag(dag: &WorkflowDag) -> Result<()> {
     for node in &dag.nodes {
         let id = node.id();
         if !seen_ids.insert(id) {
-            return Err(anyhow!("duplicate node ID: '{}'", id));
+            return Err(anyhow!("duplicate node ID: '{id}'"));
         }
     }
 
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_valid_workflow_loads() {
-        let yaml = r#"
+        let yaml = r"
 workflow_id: test-workflow
 name: Test Workflow
 description: A test workflow
@@ -91,7 +91,7 @@ nodes:
 edges:
   - from: node-a
     to: node-b
-"#;
+";
 
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(yaml.as_bytes()).unwrap();
@@ -102,7 +102,7 @@ edges:
 
     #[test]
     fn test_duplicate_node_id_error() {
-        let yaml = r#"
+        let yaml = r"
 workflow_id: test-workflow
 name: Test Workflow
 description: A test workflow
@@ -114,7 +114,7 @@ nodes:
     id: duplicate-id
     skill: test-skill-2
 edges: []
-"#;
+";
 
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(yaml.as_bytes()).unwrap();
@@ -128,7 +128,7 @@ edges: []
 
     #[test]
     fn test_bad_edge_reference_error() {
-        let yaml = r#"
+        let yaml = r"
 workflow_id: test-workflow
 name: Test Workflow
 description: A test workflow
@@ -139,7 +139,7 @@ nodes:
 edges:
   - from: nonexistent
     to: node-a
-"#;
+";
 
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(yaml.as_bytes()).unwrap();
@@ -153,7 +153,7 @@ edges:
 
     #[test]
     fn test_bad_edge_target_reference_error() {
-        let yaml = r#"
+        let yaml = r"
 workflow_id: test-workflow
 name: Test Workflow
 description: A test workflow
@@ -164,7 +164,7 @@ nodes:
 edges:
   - from: node-a
     to: nonexistent
-"#;
+";
 
         let mut file = NamedTempFile::new().unwrap();
         file.write_all(yaml.as_bytes()).unwrap();

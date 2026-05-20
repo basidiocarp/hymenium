@@ -31,6 +31,11 @@ pub struct DagExecutor {
 
 impl DagExecutor {
     /// Execute a DAG workflow, returning results for all nodes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an edge references a node ID that was not present in the DAG's node list,
+    /// which should not occur after `validate_dag` has accepted the workflow.
     pub async fn run(&self, dag: &WorkflowDag) -> Result<Vec<NodeResult>> {
         // Build adjacency lists for the DAG
         let mut incoming: HashMap<String, Vec<String>> = HashMap::new();
@@ -161,7 +166,7 @@ impl DagExecutor {
                         results.insert(result.node_id.clone(), result);
                     }
                     Ok(Err(e)) => return Err(e),
-                    Err(e) => return Err(anyhow!("task join error: {}", e)),
+                    Err(e) => return Err(anyhow!("task join error: {e}")),
                 }
             }
 
@@ -254,7 +259,7 @@ async fn execute_node(
                 Err(e) => Ok(NodeResult {
                     node_id: bash_node.id.clone(),
                     status: NodeStatus::Failed,
-                    output: format!("execution error: {}", e),
+                    output: format!("execution error: {e}"),
                 }),
             }
         }
@@ -284,7 +289,7 @@ async fn execute_node(
                     Err(e) => Ok(NodeResult {
                         node_id: cmd_node.id.clone(),
                         status: NodeStatus::Failed,
-                        output: format!("execution error: {}", e),
+                        output: format!("execution error: {e}"),
                     }),
                 }
             }
@@ -359,7 +364,7 @@ fn expand_variables(
     vars.sort_by_key(|(k, _)| std::cmp::Reverse(k.len()));
 
     for (node_id, output) in vars {
-        let pattern = format!("${}.output", node_id);
+        let pattern = format!("${node_id}.output");
         result = result.replace(&pattern, output);
     }
 

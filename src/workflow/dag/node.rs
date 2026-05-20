@@ -15,6 +15,7 @@ pub enum DagNode {
 
 impl DagNode {
     /// Extract the node ID from any variant.
+    #[must_use]
     pub fn id(&self) -> &str {
         match self {
             Self::Prompt(n) => &n.id,
@@ -26,6 +27,7 @@ impl DagNode {
     }
 
     /// Get the trigger rule for this node.
+    #[must_use]
     pub fn trigger_rule(&self) -> TriggerRule {
         match self {
             Self::Prompt(n) => n.trigger_rule.clone(),
@@ -37,6 +39,7 @@ impl DagNode {
     }
 
     /// Get the context mode for this node (only Prompt and Loop support this).
+    #[must_use]
     pub fn context_mode(&self) -> ContextMode {
         match self {
             Self::Prompt(n) => n.context.clone(),
