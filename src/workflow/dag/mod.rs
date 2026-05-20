@@ -25,7 +25,7 @@ pub mod loader;
 pub mod node;
 
 pub use executor::{DagExecutor, NodeResult, NodeStatus};
-pub use loader::{load_workflow, DagEdge, WorkflowDag};
+pub use loader::{DagEdge, WorkflowDag, load_workflow};
 pub use node::{
     ApprovalNode, BashNode, CommandNode, ContextMode, DagNode, HookEntry, LoopNode, NodeHooks,
     PromptNode, TriggerRule,

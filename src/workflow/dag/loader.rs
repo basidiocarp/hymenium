@@ -1,7 +1,7 @@
 //! YAML DAG workflow loader with validation.
 
 use crate::workflow::dag::node::DagNode;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;

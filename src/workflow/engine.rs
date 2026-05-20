@@ -1066,13 +1066,14 @@ mod tests {
             assert!(wf.record_tool_failure(2).expect("record"));
             assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
             assert_eq!(wf.status, WorkflowStatus::Failed);
-            assert!(wf
-                .current_phase()
-                .unwrap()
-                .failure_reason
-                .as_ref()
-                .unwrap()
-                .contains("ExceededFailureCeiling"));
+            assert!(
+                wf.current_phase()
+                    .unwrap()
+                    .failure_reason
+                    .as_ref()
+                    .unwrap()
+                    .contains("ExceededFailureCeiling")
+            );
         }
 
         #[test]
@@ -1085,13 +1086,14 @@ mod tests {
             assert!(wf.record_request(3).expect("record"));
             assert_eq!(wf.current_phase().unwrap().request_count, 3);
             assert_eq!(wf.current_phase().unwrap().status, PhaseStatus::Failed);
-            assert!(wf
-                .current_phase()
-                .unwrap()
-                .failure_reason
-                .as_ref()
-                .unwrap()
-                .contains("ExceededRequestCeiling"));
+            assert!(
+                wf.current_phase()
+                    .unwrap()
+                    .failure_reason
+                    .as_ref()
+                    .unwrap()
+                    .contains("ExceededRequestCeiling")
+            );
         }
 
         #[test]
@@ -1122,11 +1124,23 @@ mod tests {
         fn workflow_status_display() {
             assert_eq!(format!("{}", WorkflowStatus::Pending), "pending");
             assert_eq!(format!("{}", WorkflowStatus::InProgress), "in_progress");
-            assert_eq!(format!("{}", WorkflowStatus::BlockedOnGate), "blocked_on_gate");
-            assert_eq!(format!("{}", WorkflowStatus::AwaitingRepair), "awaiting_repair");
+            assert_eq!(
+                format!("{}", WorkflowStatus::BlockedOnGate),
+                "blocked_on_gate"
+            );
+            assert_eq!(
+                format!("{}", WorkflowStatus::AwaitingRepair),
+                "awaiting_repair"
+            );
             assert_eq!(format!("{}", WorkflowStatus::Completed), "completed");
-            assert_eq!(format!("{}", WorkflowStatus::AwaitingUserInput), "awaiting_user_input");
-            assert_eq!(format!("{}", WorkflowStatus::UserTerminated), "user_terminated");
+            assert_eq!(
+                format!("{}", WorkflowStatus::AwaitingUserInput),
+                "awaiting_user_input"
+            );
+            assert_eq!(
+                format!("{}", WorkflowStatus::UserTerminated),
+                "user_terminated"
+            );
         }
 
         #[test]
@@ -1134,7 +1148,10 @@ mod tests {
             assert_eq!(format!("{}", PhaseStatus::Pending), "pending");
             assert_eq!(format!("{}", PhaseStatus::Active), "active");
             assert_eq!(format!("{}", PhaseStatus::Completed), "completed");
-            assert_eq!(format!("{}", PhaseStatus::AwaitingUserInput), "awaiting_user_input");
+            assert_eq!(
+                format!("{}", PhaseStatus::AwaitingUserInput),
+                "awaiting_user_input"
+            );
         }
     }
 }

@@ -393,7 +393,10 @@ mod tests {
 
             match action {
                 RecoveryAction::Retry { narrowed_scope, .. } => {
-                    assert!(narrowed_scope.is_some(), "expected narrowed scope on second retry");
+                    assert!(
+                        narrowed_scope.is_some(),
+                        "expected narrowed scope on second retry"
+                    );
                 }
                 other => panic!("expected Retry, got {other:?}"),
             }
@@ -592,7 +595,10 @@ mod tests {
             let action = decide_recovery_typed(&typed(FailureKind::TaskTooLarge), 0, &policy());
             match action {
                 RecoveryAction::Retry { narrowed_scope, .. } => {
-                    assert!(narrowed_scope.is_some(), "TaskTooLarge first retry must include narrowed_scope");
+                    assert!(
+                        narrowed_scope.is_some(),
+                        "TaskTooLarge first retry must include narrowed_scope"
+                    );
                 }
                 other => panic!("expected Retry, got {other:?}"),
             }
@@ -767,7 +773,10 @@ mod tests {
                 .expect("should succeed");
             match action {
                 RecoveryAction::Retry { narrowed_scope, .. } => {
-                    assert!(narrowed_scope.is_some(), "StatusChatterOnly should narrow scope");
+                    assert!(
+                        narrowed_scope.is_some(),
+                        "StatusChatterOnly should narrow scope"
+                    );
                 }
                 other => panic!("expected Retry, got {other:?}"),
             }

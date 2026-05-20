@@ -106,6 +106,9 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    spore::logging::install_panic_hook("hymenium");
+    spore::logging::init_app("hymenium", tracing::Level::WARN);
+
     let cli = Cli::parse();
 
     match cli.command {

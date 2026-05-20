@@ -661,6 +661,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex"
+version = "1.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "regex-automata"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -886,11 +898,13 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "spore"
 version = "0.6.0"
-source = "git+https://github.com/basidiocarp/spore?rev=967e10c43a1052c9e57e226227621a83e6ac20e4#967e10c43a1052c9e57e226227621a83e6ac20e4"
+source = "git+https://github.com/basidiocarp/spore?rev=960f5aeb1d479149b3cdbeb2f850912c52521214#960f5aeb1d479149b3cdbeb2f850912c52521214"
 dependencies = [
  "anyhow",
  "chrono",
  "dirs",
+ "libc",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

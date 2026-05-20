@@ -2,7 +2,7 @@
 
 use crate::workflow::dag::loader::WorkflowDag;
 use crate::workflow::dag::node::{DagNode, TriggerRule};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use tokio::task::JoinSet;
@@ -259,43 +259,41 @@ async fn execute_node(
             }
         }
 
-        DagNode::Command(cmd_node) => {
-            match which::which(&cmd_node.skill) {
-                Ok(bin_path) => {
-                    let mut cmd = tokio::process::Command::new(bin_path);
-                    for arg in &cmd_node.args {
-                        let expanded = expand_variables(arg, &env, &prior_results);
-                        cmd.arg(expanded);
-                    }
-
-                    match cmd.output().await {
-                        Ok(output) => {
-                            let success = output.status.success();
-                            let output_str = String::from_utf8_lossy(&output.stdout).to_string();
-                            Ok(NodeResult {
-                                node_id: cmd_node.id.clone(),
-                                status: if success {
-                                    NodeStatus::Success
-                                } else {
-                                    NodeStatus::Failed
-                                },
-                                output: output_str,
-                            })
-                        }
-                        Err(e) => Ok(NodeResult {
-                            node_id: cmd_node.id.clone(),
-                            status: NodeStatus::Failed,
-                            output: format!("execution error: {}", e),
-                        }),
-                    }
+        DagNode::Command(cmd_node) => match which::which(&cmd_node.skill) {
+            Ok(bin_path) => {
+                let mut cmd = tokio::process::Command::new(bin_path);
+                for arg in &cmd_node.args {
+                    let expanded = expand_variables(arg, &env, &prior_results);
+                    cmd.arg(expanded);
                 }
-                Err(_) => Ok(NodeResult {
-                    node_id: cmd_node.id.clone(),
-                    status: NodeStatus::Failed,
-                    output: format!("skill '{}' not found in PATH", cmd_node.skill),
-                }),
+
+                match cmd.output().await {
+                    Ok(output) => {
+                        let success = output.status.success();
+                        let output_str = String::from_utf8_lossy(&output.stdout).to_string();
+                        Ok(NodeResult {
+                            node_id: cmd_node.id.clone(),
+                            status: if success {
+                                NodeStatus::Success
+                            } else {
+                                NodeStatus::Failed
+                            },
+                            output: output_str,
+                        })
+                    }
+                    Err(e) => Ok(NodeResult {
+                        node_id: cmd_node.id.clone(),
+                        status: NodeStatus::Failed,
+                        output: format!("execution error: {}", e),
+                    }),
+                }
             }
-        }
+            Err(_) => Ok(NodeResult {
+                node_id: cmd_node.id.clone(),
+                status: NodeStatus::Failed,
+                output: format!("skill '{}' not found in PATH", cmd_node.skill),
+            }),
+        },
 
         DagNode::Prompt(ref _prompt_node) => {
             // TODO: dispatch via canopy
@@ -495,10 +493,7 @@ mod tests {
         assert_eq!(review_tests.status, NodeStatus::Success);
 
         // The synthesize prompt node should be Skipped (Phase 1 scope)
-        let synthesize = results
-            .iter()
-            .find(|r| r.node_id == "synthesize")
-            .unwrap();
+        let synthesize = results.iter().find(|r| r.node_id == "synthesize").unwrap();
         assert_eq!(synthesize.status, NodeStatus::Skipped);
     }
 
