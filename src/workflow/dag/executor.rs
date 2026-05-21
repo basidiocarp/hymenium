@@ -37,6 +37,25 @@ impl DagExecutor {
     /// Panics if an edge references a node ID that was not present in the DAG's node list,
     /// which should not occur after `validate_dag` has accepted the workflow.
     pub async fn run(&self, dag: &WorkflowDag) -> Result<Vec<NodeResult>> {
+        // Acquire the workflow lock to block context compaction during execution.
+        // Lock errors are non-fatal; log a warning and continue.
+        if let Err(e) = crate::workflow_lock::acquire_lock(&dag.workflow_id, "dag-execution") {
+            tracing::warn!("failed to acquire workflow lock: {}", e);
+        }
+
+        // Run the workflow and ensure the lock is released on both success and failure.
+        let result = self.run_inner(dag).await;
+
+        // Release the lock, but don't fail the workflow if unlock fails.
+        if let Err(e) = crate::workflow_lock::release_lock() {
+            tracing::warn!("failed to release workflow lock: {}", e);
+        }
+
+        result
+    }
+
+    /// Inner implementation of the workflow executor.
+    async fn run_inner(&self, dag: &WorkflowDag) -> Result<Vec<NodeResult>> {
         // Build adjacency lists for the DAG
         let mut incoming: HashMap<String, Vec<String>> = HashMap::new();
         let mut outgoing: HashMap<String, Vec<String>> = HashMap::new();

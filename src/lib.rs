@@ -17,3 +17,4 @@ pub mod retry;
 pub mod store;
 pub mod sweeper;
 pub mod workflow;
+pub mod workflow_lock;

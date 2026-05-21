@@ -102,6 +102,19 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Handle Claude Code hook events
+    Hook {
+        #[command(subcommand)]
+        event: HookCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookCommand {
+    /// Handle PreCompact hook event — block compaction if a workflow phase is active
+    #[command(name = "pre-compact")]
+    PreCompact,
 }
 
 #[tokio::main]
@@ -186,6 +199,12 @@ async fn main() -> Result<()> {
                 .await
                 .context("workflow execution failed")?;
         }
+
+        Commands::Hook { event } => match event {
+            HookCommand::PreCompact => {
+                handle_pre_compact_hook();
+            }
+        },
     }
 
     Ok(())
@@ -208,4 +227,23 @@ fn open_store() -> Result<WorkflowStore> {
         hymenium::sweeper::Sweeper::start(db_path.clone()).context("failed to start sweeper")?;
     WorkflowStore::open(&db_path)
         .with_context(|| format!("could not open workflow store at {}", db_path.display()))
+}
+
+/// Handle the pre-compact hook event.
+///
+/// Checks if a workflow is currently executing. If yes, returns a block decision
+/// with the active workflow phase. If no, returns an allow decision.
+/// Always produces valid JSON to stdout; never errors out.
+fn handle_pre_compact_hook() {
+    let response = match hymenium::workflow_lock::read_active_lock() {
+        Some(lock) => serde_json::json!({
+            "decision": "block",
+            "reason": format!(
+                "hymenium workflow phase '{}' is active — compaction would interrupt in-flight state",
+                lock.phase
+            )
+        }),
+        None => serde_json::json!({ "decision": "allow" }),
+    };
+    println!("{response}");
 }

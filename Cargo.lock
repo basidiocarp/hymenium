@@ -391,6 +391,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "lazy_static",
  "libc",
  "rusqlite",
  "serde",
