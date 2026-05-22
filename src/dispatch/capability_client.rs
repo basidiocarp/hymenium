@@ -552,6 +552,10 @@ impl<C: CanopyClient> CanopyClient for CapabilityCanopyClient<C> {
     ) -> Result<ImportResult, DispatchError> {
         self.fallback.import_handoff(path, assign_to)
     }
+
+    fn cancel_task(&self, task_id: &str) -> Result<(), DispatchError> {
+        self.fallback.cancel_task(task_id)
+    }
 }
 
 // ---------------------------------------------------------------------------

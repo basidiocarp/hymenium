@@ -237,6 +237,9 @@ mod tests {
                     "FixedStatusMock: import_handoff not implemented".to_string(),
                 ))
             }
+            fn cancel_task(&self, _task_id: &str) -> Result<(), DispatchError> {
+                Ok(())
+            }
         }
 
         let canopy = FixedStatusMock::new();

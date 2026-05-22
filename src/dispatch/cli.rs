@@ -377,6 +377,11 @@ impl CanopyClient for CliCanopyClient {
         serde_json::from_str(&json)
             .map_err(|e| DispatchError::CanopyError(format!("failed to parse import result: {e}")))
     }
+
+    fn cancel_task(&self, task_id: &str) -> Result<(), DispatchError> {
+        self.run(&["task", "cancel", task_id, "--cancelled-by", "hymenium"])?;
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------

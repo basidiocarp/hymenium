@@ -179,6 +179,14 @@ pub trait CanopyClient {
         path: &str,
         assign_to: Option<&str>,
     ) -> Result<ImportResult, DispatchError>;
+
+    /// Cancel a task by ID.
+    ///
+    /// Used as a compensating action when partial dispatch fails mid-loop so
+    /// already-created subtasks do not remain permanently orphaned in Canopy.
+    /// Failures here are best-effort: if cancel itself fails, a warning is
+    /// emitted but the original dispatch error is still propagated.
+    fn cancel_task(&self, task_id: &str) -> Result<(), DispatchError>;
 }
 
 // ---------------------------------------------------------------------------

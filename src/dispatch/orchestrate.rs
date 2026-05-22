@@ -107,18 +107,14 @@ pub fn dispatch_workflow(
     let acceptance_criteria = build_acceptance_criteria(handoff);
 
     // Create a subtask for each phase and store its canopy task ID.
+    // Collect created IDs so we can cancel them as a compensating action if
+    // creation fails mid-loop. Cancel failures are best-effort: a warn is
+    // emitted but the original dispatch error is still propagated.
     //
-    // KNOWN LIMITATION: If a subtask creation fails mid-loop, previously created
-    // tasks in canopy are orphaned (permanently unreferenced from hymenium).
-    // The CanopyClient trait does not yet expose a cancel_task method, so cleanup
-    // is not possible at this time. Orphaned tasks remain in Canopy's ledger but
-    // are never assigned agents or monitored for progress.
-    //
-    // OPERATORS: If dispatch fails partway through, inspect Canopy manually to
-    // find and cancel orphaned subtasks. A future reconciliation scan
-    // (see TODO below) can automate this.
-    //
-    // TODO(#118f-rollback): add CanopyClient::cancel_task and compensate on failure.
+    // The parent task (parent_task_id) is intentionally left alive on partial
+    // failure so operators can inspect it in Canopy to diagnose the error.
+    // Only the successfully-created subtask IDs are cancelled here.
+    let mut created_task_ids: Vec<String> = Vec::new();
     for (phase, state) in template.phases.iter().zip(instance.phase_states.iter_mut()) {
         let title = format!(
             "[{}] {} \u{2014} {}",
@@ -170,8 +166,19 @@ pub fn dispatch_workflow(
             .create_subtask(&parent_task_id, &title, &description, &options)
             .inspect_err(|err| {
                 log_dispatch_error("create_subtask", err);
+                // Cancel already-created subtasks to prevent orphans in Canopy.
+                for id in &created_task_ids {
+                    if let Err(cancel_err) = canopy.cancel_task(id) {
+                        tracing::warn!(
+                            task_id = %id,
+                            error = %cancel_err,
+                            "failed to cancel orphaned subtask after partial dispatch failure",
+                        );
+                    }
+                }
             })?;
 
+        created_task_ids.push(subtask_id.clone());
         state.canopy_task_id = Some(subtask_id);
     }
 
@@ -866,6 +873,10 @@ mod tests {
             ) -> Result<ImportResult, DispatchError> {
                 self.inner.import_handoff(path, assign_to)
             }
+
+            fn cancel_task(&self, task_id: &str) -> Result<(), DispatchError> {
+                self.inner.cancel_task(task_id)
+            }
         }
 
         let capturing = TitleCapturingMock::new();
@@ -1280,6 +1291,10 @@ mod tests {
                 assign_to: Option<&str>,
             ) -> Result<ImportResult, DispatchError> {
                 self.inner.import_handoff(path, assign_to)
+            }
+
+            fn cancel_task(&self, task_id: &str) -> Result<(), DispatchError> {
+                self.inner.cancel_task(task_id)
             }
         }
 

@@ -97,6 +97,10 @@ impl CanopyClient for StatusMock {
     ) -> Result<ImportResult, DispatchError> {
         unimplemented!("not needed for reconcile tests")
     }
+
+    fn cancel_task(&self, _task_id: &str) -> Result<(), DispatchError> {
+        Ok(())
+    }
 }
 
 /// Build a workflow instance in the "just dispatched" state:

@@ -220,6 +220,10 @@ pub(super) mod test_helpers {
                 subtask_ids: Vec::new(),
             })
         }
+
+        fn cancel_task(&self, _task_id: &str) -> Result<(), DispatchError> {
+            Ok(())
+        }
     }
 
     pub fn make_workflow() -> crate::workflow::engine::WorkflowInstance {

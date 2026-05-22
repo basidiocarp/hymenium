@@ -163,6 +163,15 @@ impl CanopyClient for MockCanopyClient {
         Ok(self.default_completeness.clone())
     }
 
+    fn cancel_task(&self, task_id: &str) -> Result<(), DispatchError> {
+        let mut tasks = self.tasks.borrow_mut();
+        let detail = tasks
+            .get_mut(task_id)
+            .ok_or_else(|| DispatchError::InvalidState(format!("task {task_id} not found")))?;
+        detail.status = "cancelled".to_string();
+        Ok(())
+    }
+
     fn import_handoff(
         &self,
         _path: &str,
