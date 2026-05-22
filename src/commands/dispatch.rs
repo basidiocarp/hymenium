@@ -52,11 +52,9 @@ pub fn run(path: &Path, store: &WorkflowStore) -> Result<WorkflowInstance, Dispa
     hasher.update(&source);
     let content_hash = format!("{:x}", hasher.finalize());
 
-    // Check if we've already dispatched this handoff (non-terminal workflow exists).
-    if let Some(existing) = store.find_workflow_by_hash(&content_hash)? {
-        return Ok(existing);
-    }
-
+    // Atomically check if we've already dispatched this handoff (non-terminal workflow exists).
+    // If so, return it. Otherwise, parse, dispatch, and insert in a transaction to prevent
+    // concurrent dispatches on the same content from creating duplicate workflows.
     let handoff = parse_handoff(&source)?;
 
     // Load the impl-audit template from the registry.
@@ -88,18 +86,20 @@ pub fn run(path: &Path, store: &WorkflowStore) -> Result<WorkflowInstance, Dispa
         &canopy,
     )?;
 
-    // Insert the workflow row first so the FK on workflow_transitions is satisfied.
-    store.insert_workflow_with_hash(&instance, Some(&content_hash))?;
+    // Atomically find or insert the workflow by hash. This prevents concurrent
+    // dispatches on the same handoff content from both passing the check and
+    // both inserting, which would create duplicate live workflows.
+    let persisted = store.find_and_insert_workflow_by_hash(&instance, &content_hash)?;
 
     // Record the initial transition after the parent row exists.
     store.record_transition(
-        &instance.workflow_id,
+        &persisted.workflow_id,
         None,
-        instance.phase_states.first().map(|p| p.phase_id.as_str()),
+        persisted.phase_states.first().map(|p| p.phase_id.as_str()),
         Some("initial dispatch"),
     )?;
 
-    Ok(instance)
+    Ok(persisted)
 }
 
 #[cfg(test)]

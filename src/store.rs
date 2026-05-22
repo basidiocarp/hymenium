@@ -384,6 +384,49 @@ impl WorkflowStore {
         }
     }
 
+    /// Atomically find or insert a workflow by content hash.
+    ///
+    /// If a non-terminal workflow with the given hash already exists, returns it.
+    /// Otherwise, inserts the new workflow instance and returns it.
+    /// Both operations are atomic within a single transaction to prevent
+    /// concurrent dispatches on the same handoff content from creating duplicates.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StoreError` if the transaction fails or if a database constraint is violated.
+    pub fn find_and_insert_workflow_by_hash(
+        &self,
+        inst: &WorkflowInstance,
+        content_hash: &str,
+    ) -> Result<WorkflowInstance, StoreError> {
+        self.with_transaction::<_, WorkflowInstance, StoreError>(|store| {
+            // Check if a non-terminal workflow with this hash already exists.
+            let row: Result<String, _> = store.conn.query_row(
+                "SELECT workflow_id FROM workflows
+                 WHERE content_hash = ?1
+                   AND status NOT IN ('completed', 'failed', 'cancelled', 'user_terminated')
+                 ORDER BY created_at DESC
+                 LIMIT 1",
+                params![content_hash],
+                |r| r.get(0),
+            );
+
+            match row {
+                Ok(wf_id) => {
+                    // Existing non-terminal workflow found; return it.
+                    store.get_workflow(&WorkflowId(wf_id.clone()))?
+                        .ok_or_else(|| StoreError::NotFound(wf_id))
+                }
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    // No existing workflow; insert the new one.
+                    store.insert_workflow_with_hash(inst, Some(content_hash))?;
+                    Ok(inst.clone())
+                }
+                Err(e) => Err(StoreError::Sqlite(e)),
+            }
+        })
+    }
+
     /// Update the top-level status and `blocked_on` for a workflow.
     pub fn update_workflow_status(
         &self,
@@ -1421,5 +1464,57 @@ mod tests {
             found.is_none(),
             "terminal workflow should not be returned by hash lookup"
         );
+    }
+
+    #[test]
+    fn test_find_and_insert_workflow_by_hash_deduplicates() {
+        let store = temp_store();
+        let inst1 = make_instance("01JNQWHASH00000000000003");
+        let inst2 = make_instance("01JNQWHASH00000000000004");
+        let hash = "xyz789abc123";
+
+        // First call: insert inst1 with the hash
+        let result1 = store
+            .find_and_insert_workflow_by_hash(&inst1, hash)
+            .expect("first insert should succeed");
+        assert_eq!(
+            result1.workflow_id, inst1.workflow_id,
+            "first call should return inst1"
+        );
+
+        // Second call: should find existing inst1 and return it, NOT insert inst2
+        let result2 = store
+            .find_and_insert_workflow_by_hash(&inst2, hash)
+            .expect("second find should succeed");
+        assert_eq!(
+            result2.workflow_id, inst1.workflow_id,
+            "second call should return inst1 (existing), not inst2"
+        );
+
+        // Verify only inst1 exists in the database
+        let inst1_from_db = store
+            .get_workflow(&inst1.workflow_id)
+            .expect("get inst1")
+            .expect("inst1 should exist");
+        assert_eq!(inst1_from_db.workflow_id, inst1.workflow_id);
+
+        let inst2_from_db = store
+            .get_workflow(&inst2.workflow_id)
+            .expect("get inst2");
+        assert!(
+            inst2_from_db.is_none(),
+            "inst2 should not have been inserted"
+        );
+
+        // Verify only one row exists for the hash
+        let count: i64 = store
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM workflows WHERE content_hash = ?1",
+                params![hash],
+                |r| r.get(0),
+            )
+            .expect("count hash entries");
+        assert_eq!(count, 1, "only one workflow should exist for this hash");
     }
 }
