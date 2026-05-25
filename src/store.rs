@@ -76,8 +76,9 @@ impl WorkflowStore {
             })?;
         }
         let conn = Connection::open(path)?;
-        // Enable foreign key enforcement.
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+        )?;
         let store = Self {
             db_path: path.to_owned(),
             conn,

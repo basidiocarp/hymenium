@@ -133,7 +133,9 @@ impl RuntimeRegistry {
     pub fn open(db_path: impl Into<PathBuf>) -> Result<Self, SweeperError> {
         let path: PathBuf = db_path.into();
         let conn = Connection::open(&path)?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+        )?;
         let registry = Self { conn };
         registry.migrate()?;
         Ok(registry)
