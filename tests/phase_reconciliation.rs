@@ -21,13 +21,20 @@ use std::collections::HashMap;
 /// A minimal mock client that returns pre-configured statuses for task IDs.
 struct StatusMock {
     statuses: RefCell<HashMap<String, String>>,
+    has_evidence: bool,
 }
 
 impl StatusMock {
     fn new() -> Self {
         Self {
             statuses: RefCell::new(HashMap::new()),
+            has_evidence: false,
         }
+    }
+
+    fn with_evidence(mut self) -> Self {
+        self.has_evidence = true;
+        self
     }
 
     fn set(self, task_id: &str, status: &str) -> Self {
@@ -76,8 +83,8 @@ impl CanopyClient for StatusMock {
             agent_id: None,
             parent_id: None,
             required_capabilities: vec![],
-            has_code_diff: false,
-            has_verification_passed: false,
+            has_code_diff: self.has_evidence,
+            has_verification_passed: self.has_evidence,
         })
     }
 
@@ -128,7 +135,7 @@ fn phase_reconciliation_marks_active_phase_completed_when_canopy_task_is_complet
         .set("task-implement", "completed")
         .set("task-audit", "active");
 
-    let result = reconcile_phases(instance, &canopy).expect("reconcile should succeed");
+    let result = reconcile_phases(instance, &canopy, true).expect("reconcile should succeed");
 
     // Implement phase must be Completed.
     assert_eq!(
@@ -169,7 +176,7 @@ fn phase_reconciliation_does_not_advance_when_canopy_task_is_still_active() {
         .set("task-implement", "active")
         .set("task-audit", "active");
 
-    let result = reconcile_phases(instance, &canopy).expect("reconcile should succeed");
+    let result = reconcile_phases(instance, &canopy, true).expect("reconcile should succeed");
 
     // Implement phase must still be Pending (dispatch leaves it Pending).
     assert_eq!(
@@ -203,7 +210,7 @@ fn phase_reconciliation_is_idempotent() {
         .set("task-audit", "active");
 
     // First call: implement phase completes and workflow advances to audit.
-    let result1 = reconcile_phases(instance, &canopy).expect("first reconcile");
+    let result1 = reconcile_phases(instance, &canopy, true).expect("first reconcile");
     assert_eq!(result1.instance.current_phase_idx, 1);
     assert_eq!(
         result1.instance.phase_states[0].status,
@@ -211,7 +218,7 @@ fn phase_reconciliation_is_idempotent() {
     );
 
     // Second call: audit phase is still active, no change.
-    let result2 = reconcile_phases(result1.instance, &canopy).expect("second reconcile");
+    let result2 = reconcile_phases(result1.instance, &canopy, true).expect("second reconcile");
 
     // Still at audit phase, still active.
     assert_eq!(result2.instance.current_phase_idx, 1);
@@ -238,7 +245,7 @@ fn phase_reconciliation_advances_to_next_phase_after_completion() {
         .set("task-implement", "completed")
         .set("task-audit", "active");
 
-    let result = reconcile_phases(instance, &canopy).expect("reconcile");
+    let result = reconcile_phases(instance, &canopy, true).expect("reconcile");
 
     // After implement completes, we should be at audit (index 1).
     assert_eq!(
@@ -270,7 +277,7 @@ fn phase_reconciliation_marks_phase_failed_when_canopy_task_cancelled() {
         .set("task-implement", "cancelled")
         .set("task-audit", "active");
 
-    let result = reconcile_phases(instance, &canopy).expect("reconcile");
+    let result = reconcile_phases(instance, &canopy, true).expect("reconcile");
 
     // Implement phase must be Failed.
     assert_eq!(
@@ -320,7 +327,7 @@ fn phase_reconciliation_handles_both_cancelled_spellings() {
         let instance = dispatched_instance(&format!("wf-spell-{status}"));
         let canopy = StatusMock::new().set("task-implement", status);
 
-        let result = reconcile_phases(instance, &canopy)
+        let result = reconcile_phases(instance, &canopy, true)
             .unwrap_or_else(|e| panic!("reconcile failed for status {status}: {e}"));
 
         assert_eq!(
@@ -336,7 +343,7 @@ fn phase_reconciliation_handles_both_cancelled_spellings() {
         let instance = dispatched_instance(&format!("wf-spell-{status}"));
         let canopy = StatusMock::new().set("task-implement", status);
 
-        let result = reconcile_phases(instance, &canopy)
+        let result = reconcile_phases(instance, &canopy, true)
             .unwrap_or_else(|e| panic!("reconcile failed for status {status}: {e}"));
 
         assert_eq!(
@@ -365,7 +372,7 @@ fn phase_reconciliation_skips_phases_without_canopy_task_id() {
 
     let canopy = StatusMock::new().set("task-audit", "completed");
 
-    let result = reconcile_phases(instance, &canopy).expect("reconcile");
+    let result = reconcile_phases(instance, &canopy, true).expect("reconcile");
 
     // Current phase (implement) has no task ID — skipped, stays Pending.
     assert_eq!(result.instance.phase_states[0].status, PhaseStatus::Pending);
@@ -405,7 +412,7 @@ fn phase_reconciliation_already_completed_phase_is_idempotent() {
         .set("task-implement", "completed") // should be ignored
         .set("task-audit", "active");
 
-    let result = reconcile_phases(instance, &canopy).expect("reconcile");
+    let result = reconcile_phases(instance, &canopy, true).expect("reconcile");
 
     // Implement phase must remain Completed.
     assert_eq!(
@@ -447,7 +454,7 @@ fn phase_reconciliation_final_phase_completion_marks_workflow_completed() {
     // Canopy reports audit as completed.
     let canopy = StatusMock::new().set("task-audit", "completed");
 
-    let result = reconcile_phases(instance, &canopy).expect("reconcile");
+    let result = reconcile_phases(instance, &canopy, true).expect("reconcile");
 
     assert_eq!(
         result.instance.phase_states[1].status,
@@ -458,5 +465,72 @@ fn phase_reconciliation_final_phase_completion_marks_workflow_completed() {
         result.instance.status,
         WorkflowStatus::Completed,
         "workflow must be Completed after final phase completes"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: EvidenceGateEvaluator blocks advance when evidence is absent
+// ---------------------------------------------------------------------------
+
+#[test]
+fn evidence_gate_blocks_advance_when_code_diff_and_verification_absent() {
+    // force_advance=false uses EvidenceGateEvaluator; evidence absent → no advance.
+    let instance = dispatched_instance("wf-gate-block");
+    // StatusMock defaults: has_code_diff=false, has_verification_passed=false.
+    let canopy = StatusMock::new().set("task-implement", "completed");
+
+    let result = reconcile_phases(instance, &canopy, false).expect("reconcile");
+
+    // Phase is marked completed (Canopy signal).
+    assert_eq!(
+        result.instance.phase_states[0].status,
+        PhaseStatus::Completed,
+        "implement phase must be Completed even when gate blocks advance"
+    );
+    // But workflow did NOT advance — gate blocked it.
+    assert_eq!(
+        result.instance.current_phase_idx, 0,
+        "workflow must not advance when evidence gate is not satisfied"
+    );
+    assert!(
+        matches!(
+            result.outcomes[0],
+            PhaseReconcileOutcome::MarkedCompleted { advanced: false, .. }
+        ),
+        "expected MarkedCompleted with advanced=false, got: {:?}",
+        result.outcomes[0]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: EvidenceGateEvaluator allows advance when evidence is present
+// ---------------------------------------------------------------------------
+
+#[test]
+fn evidence_gate_allows_advance_when_code_diff_and_verification_present() {
+    // force_advance=false uses EvidenceGateEvaluator; evidence present → advance proceeds.
+    let instance = dispatched_instance("wf-gate-pass");
+    let canopy = StatusMock::new()
+        .with_evidence()
+        .set("task-implement", "completed")
+        .set("task-audit", "active");
+
+    let result = reconcile_phases(instance, &canopy, false).expect("reconcile");
+
+    assert_eq!(
+        result.instance.phase_states[0].status,
+        PhaseStatus::Completed
+    );
+    assert_eq!(
+        result.instance.current_phase_idx, 1,
+        "workflow must advance when evidence gate is satisfied"
+    );
+    assert!(
+        matches!(
+            result.outcomes[0],
+            PhaseReconcileOutcome::MarkedCompleted { advanced: true, .. }
+        ),
+        "expected MarkedCompleted with advanced=true, got: {:?}",
+        result.outcomes[0]
     );
 }

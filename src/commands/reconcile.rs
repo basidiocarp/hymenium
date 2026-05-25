@@ -31,7 +31,7 @@ pub enum ReconcileCommandError {
 /// summary of what changed.
 pub fn run(workflow_id: &str, store: &WorkflowStore) -> Result<(), ReconcileCommandError> {
     let canopy = CliCanopyClient::new("canopy");
-    run_with_client(workflow_id, store, &canopy)
+    run_with_client(workflow_id, store, &canopy, false)
 }
 
 /// Run the `reconcile` command with an injected Canopy client.
@@ -42,6 +42,7 @@ pub fn run_with_client(
     workflow_id: &str,
     store: &WorkflowStore,
     canopy: &dyn CanopyClient,
+    force_advance: bool,
 ) -> Result<(), ReconcileCommandError> {
     let id = WorkflowId(workflow_id.to_string());
 
@@ -49,7 +50,7 @@ pub fn run_with_client(
         .get_workflow(&id)?
         .ok_or_else(|| ReconcileCommandError::NotFound(workflow_id.to_string()))?;
 
-    let result = reconcile_phases(instance, canopy)?;
+    let result = reconcile_phases(instance, canopy, force_advance)?;
 
     store.with_transaction(|store| {
         // Persist all updated phase states.
@@ -218,8 +219,8 @@ mod tests {
                     agent_id: None,
                     parent_id: None,
                     required_capabilities: vec![],
-                    has_code_diff: false,
-                    has_verification_passed: false,
+                    has_code_diff: true,
+                    has_verification_passed: true,
                 })
             }
             fn check_completeness(&self, _path: &str) -> Result<CompletenessReport, DispatchError> {
@@ -248,7 +249,7 @@ mod tests {
         canopy.set_status("canopy-impl-task", "completed");
         canopy.set_status("canopy-audit-task", "active");
 
-        run_with_client("wf-cmd-1", &store, &canopy).expect("reconcile should succeed");
+        run_with_client("wf-cmd-1", &store, &canopy, false).expect("reconcile should succeed");
 
         let updated = store
             .get_workflow(&WorkflowId("wf-cmd-1".to_string()))
@@ -260,5 +261,79 @@ mod tests {
         // Workflow advanced to audit phase.
         assert_eq!(updated.current_phase_idx, 1);
         assert_eq!(updated.status, WorkflowStatus::Dispatched);
+    }
+
+    #[test]
+    #[allow(clippy::items_after_statements)]
+    fn reconcile_command_blocks_advance_when_evidence_missing() {
+        // force_advance=false: gate must prevent advance when has_code_diff/
+        // has_verification_passed are both absent, even though Canopy says completed.
+        use crate::dispatch::{CanopyClient, CompletenessReport, DispatchError, ImportResult};
+
+        let store = tmp_store();
+        let instance = dispatched_instance("wf-cmd-gate");
+        store.insert_workflow(&instance).expect("insert");
+
+        struct NoEvidenceMock;
+
+        impl CanopyClient for NoEvidenceMock {
+            fn create_task(
+                &self, _: &str, _: &str, _: &str, _: &TaskOptions,
+            ) -> Result<String, DispatchError> {
+                Err(DispatchError::CanopyError("not implemented".into()))
+            }
+            fn create_subtask(
+                &self, _: &str, _: &str, _: &str, _: &TaskOptions,
+            ) -> Result<String, DispatchError> {
+                Err(DispatchError::CanopyError("not implemented".into()))
+            }
+            fn assign_task(&self, _: &str, _: &str, _: &str) -> Result<(), DispatchError> {
+                Err(DispatchError::CanopyError("not implemented".into()))
+            }
+            fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
+                Ok(TaskDetail {
+                    task_id: task_id.to_string(),
+                    title: "test task".to_string(),
+                    status: "completed".to_string(),
+                    agent_id: None,
+                    parent_id: None,
+                    required_capabilities: vec![],
+                    has_code_diff: false,
+                    has_verification_passed: false,
+                })
+            }
+            fn check_completeness(&self, _: &str) -> Result<CompletenessReport, DispatchError> {
+                Ok(CompletenessReport {
+                    complete: true,
+                    total_items: 0,
+                    completed_items: 0,
+                    missing: vec![],
+                })
+            }
+            fn import_handoff(
+                &self, _: &str, _: Option<&str>,
+            ) -> Result<ImportResult, DispatchError> {
+                Err(DispatchError::CanopyError("not implemented".into()))
+            }
+            fn cancel_task(&self, _: &str) -> Result<(), DispatchError> {
+                Ok(())
+            }
+        }
+
+        run_with_client("wf-cmd-gate", &store, &NoEvidenceMock, false)
+            .expect("reconcile must not error");
+
+        let updated = store
+            .get_workflow(&WorkflowId("wf-cmd-gate".to_string()))
+            .expect("load")
+            .expect("should exist");
+
+        // Phase is completed (Canopy reported it done).
+        assert_eq!(updated.phase_states[0].status, PhaseStatus::Completed);
+        // Gate blocked advance — still on phase 0.
+        assert_eq!(
+            updated.current_phase_idx, 0,
+            "gate must prevent advance when evidence is absent"
+        );
     }
 }

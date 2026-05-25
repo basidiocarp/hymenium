@@ -27,7 +27,7 @@ pub use orchestrate::{agent_name, dispatch_workflow, handoff_slug};
 pub use task_packet::{CapabilityRequirements, ContextBudget, TaskPacket};
 
 use crate::workflow::engine::{WorkflowInstance, WorkflowStatus};
-use crate::workflow::gate::PermissiveGateEvaluator;
+use crate::workflow::gate::{EvidenceGateEvaluator, PermissiveGateEvaluator};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -249,10 +249,13 @@ fn is_failed_status(status: &str) -> bool {
 ///
 /// ## Gate evaluation on advance
 ///
-/// When a phase is marked completed and the workflow attempts to advance, a
-/// permissive gate evaluator is used. The rationale: a completed Canopy task
-/// implies the assigned agent satisfied all gate conditions as part of its
-/// work. Hymenium trusts the Canopy completion signal as the gate outcome.
+/// When a phase is marked completed and the workflow attempts to advance:
+/// - If `force_advance` is `false`: uses `EvidenceGateEvaluator` to check
+///   that the task has `has_code_diff` and `has_verification_passed` set.
+/// - If `force_advance` is `true`: uses `PermissiveGateEvaluator`, which
+///   passes every condition unconditionally. A completed Canopy task implies
+///   the assigned agent satisfied all gate conditions as part of its work.
+///   Hymenium trusts the Canopy completion signal as the gate outcome.
 ///
 /// ## Error handling
 ///
@@ -263,9 +266,8 @@ fn is_failed_status(status: &str) -> bool {
 pub fn reconcile_phases(
     mut instance: WorkflowInstance,
     canopy: &dyn CanopyClient,
+    force_advance: bool,
 ) -> Result<ReconcileResult, DispatchError> {
-    // Permissive gate evaluator: a completed Canopy task implies gate satisfaction.
-    let gate_evaluator = PermissiveGateEvaluator;
 
     let phase_count = instance.phase_states.len();
     let mut outcomes = Vec::with_capacity(phase_count);
@@ -315,24 +317,47 @@ pub fn reconcile_phases(
                 ))
             })?;
 
-            // Attempt to advance to the next phase. A permissive evaluator is
-            // used because Canopy task completion implies gate satisfaction.
-            let advanced = match instance.advance(&gate_evaluator) {
-                Ok(_transition) => {
-                    // Advance succeeded: update workflow status to reflect the
-                    // newly active phase is waiting for dispatch.
-                    instance.status = WorkflowStatus::Dispatched;
-                    true
+            // Attempt to advance to the next phase.
+            // Use the appropriate gate evaluator based on force_advance.
+            let advanced = if force_advance {
+                let gate_evaluator = PermissiveGateEvaluator;
+                match instance.advance(&gate_evaluator) {
+                    Ok(_transition) => {
+                        // Advance succeeded: update workflow status to reflect the
+                        // newly active phase is waiting for dispatch.
+                        instance.status = WorkflowStatus::Dispatched;
+                        true
+                    }
+                    Err(crate::workflow::engine::WorkflowError::AlreadyAtFinalPhase) => {
+                        // Final phase completed — workflow is done.
+                        instance.status = WorkflowStatus::Completed;
+                        true
+                    }
+                    Err(_) => {
+                        // Gate check failed or other advance error; leave the workflow
+                        // at the current (now-completed) phase.
+                        false
+                    }
                 }
-                Err(crate::workflow::engine::WorkflowError::AlreadyAtFinalPhase) => {
-                    // Final phase completed — workflow is done.
-                    instance.status = WorkflowStatus::Completed;
-                    false
-                }
-                Err(_) => {
-                    // Gate check failed or other advance error; leave the workflow
-                    // at the current (now-completed) phase.
-                    false
+            } else {
+                let gate_evaluator = EvidenceGateEvaluator::new(task_detail.clone());
+                match instance.advance(&gate_evaluator) {
+                    Ok(_transition) => {
+                        // Advance succeeded: update workflow status to reflect the
+                        // newly active phase is waiting for dispatch.
+                        instance.status = WorkflowStatus::Dispatched;
+                        true
+                    }
+                    Err(crate::workflow::engine::WorkflowError::AlreadyAtFinalPhase) => {
+                        // Final phase completed — workflow is done.
+                        instance.status = WorkflowStatus::Completed;
+                        true
+                    }
+                    Err(_) => {
+                        // Gate check failed or other advance error; leave the workflow
+                        // at the current (now-completed) phase.
+                        false
+                    }
                 }
             };
 
