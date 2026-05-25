@@ -196,6 +196,18 @@ pub fn dispatch_workflow(
     }
 
     instance.status = crate::workflow::engine::WorkflowStatus::Dispatched;
+    let first_agent = instance
+        .phase_states
+        .first()
+        .and_then(|s| s.agent_id.as_deref())
+        .unwrap_or("none");
+    tracing::info!(
+        workflow_id = %instance.workflow_id,
+        handoff_path = %instance.handoff_path,
+        phase_count = instance.phase_states.len(),
+        first_agent,
+        "workflow dispatched"
+    );
     Ok(instance)
 }
 
