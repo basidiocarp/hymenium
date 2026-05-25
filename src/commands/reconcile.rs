@@ -51,14 +51,16 @@ pub fn run_with_client(
 
     let result = reconcile_phases(instance, canopy)?;
 
-    // Persist all updated phase states.
-    for (order, phase) in result.instance.phase_states.iter().enumerate() {
-        store.upsert_phase_state(&id, phase, order)?;
-    }
-
-    // Persist the updated workflow status and current phase index.
-    store.update_workflow_status(&id, &result.instance.status, None)?;
-    store.update_current_phase_idx(&id, result.instance.current_phase_idx)?;
+    store.with_transaction(|store| {
+        // Persist all updated phase states.
+        for (order, phase) in result.instance.phase_states.iter().enumerate() {
+            store.upsert_phase_state(&id, phase, order)?;
+        }
+        // Persist the updated workflow status and current phase index.
+        store.update_workflow_status(&id, &result.instance.status, None)?;
+        store.update_current_phase_idx(&id, result.instance.current_phase_idx)?;
+        Ok::<(), ReconcileCommandError>(())
+    })?;
 
     // Print a human-readable summary.
     print_summary(workflow_id, &result.outcomes, &result.instance.status);
