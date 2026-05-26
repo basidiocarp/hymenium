@@ -12,6 +12,7 @@ use crate::workflow::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::warn;
 
 /// Error type for workflow engine operations.
 #[derive(Debug, Error)]
@@ -612,7 +613,12 @@ impl WorkflowInstance {
             }
         })?;
 
-        Ok(evaluation.passed())
+        let passed = evaluation.passed();
+        if !passed {
+            let failures = evaluation.failures();
+            warn!(gate_failures = ?failures, "phase transition blocked by gate");
+        }
+        Ok(passed)
     }
 
     /// Advance to the next phase if gates permit.
