@@ -29,6 +29,9 @@ pub enum DispatchCommandError {
 
     #[error("store error: {0}")]
     Store(#[from] StoreError),
+
+    #[error("template error: {0}")]
+    TemplateError(String),
 }
 
 /// Run the `dispatch` command: parse the handoff, create a workflow instance,
@@ -36,11 +39,6 @@ pub enum DispatchCommandError {
 ///
 /// If a non-terminal workflow with the same handoff content already exists,
 /// returns that existing workflow without re-dispatching.
-///
-/// # Panics
-///
-/// Panics if the built-in `impl-audit` template fails validation, which should
-/// never happen outside of a programming error in the template definition.
 pub fn run(path: &Path, store: &WorkflowStore) -> Result<WorkflowInstance, DispatchCommandError> {
     let source = std::fs::read_to_string(path).map_err(|e| DispatchCommandError::ReadFile {
         path: path.display().to_string(),
@@ -61,10 +59,10 @@ pub fn run(path: &Path, store: &WorkflowStore) -> Result<WorkflowInstance, Dispa
     let mut registry = TemplateRegistry::new();
     registry
         .register(impl_audit_default())
-        .expect("built-in template must be valid");
+        .map_err(|e| DispatchCommandError::TemplateError(e.to_string()))?;
     let template = registry
         .get("impl-audit")
-        .expect("impl-audit template must exist in registry")
+        .map_err(|e| DispatchCommandError::TemplateError(e.to_string()))?
         .clone();
 
     let workflow_id = WorkflowId(Ulid::new().to_string());

@@ -31,11 +31,6 @@ pub struct DagExecutor {
 
 impl DagExecutor {
     /// Execute a DAG workflow, returning results for all nodes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an edge references a node ID that was not present in the DAG's node list,
-    /// which should not occur after `validate_dag` has accepted the workflow.
     pub async fn run(&self, dag: &WorkflowDag) -> Result<Vec<NodeResult>> {
         // Acquire the workflow lock to block context compaction during execution.
         // Lock errors are non-fatal; log a warning and continue.
@@ -105,7 +100,7 @@ impl DagExecutor {
             for next_id in &outgoing[&node_id] {
                 incoming
                     .get_mut(next_id)
-                    .unwrap()
+                    .ok_or_else(|| anyhow!("DAG edge references unknown node: {next_id}"))?
                     .retain(|id| id != &node_id);
                 if incoming[next_id].is_empty() {
                     queue.push_back(next_id.clone());
