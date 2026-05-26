@@ -97,6 +97,32 @@ pub fn run(workflow_id: &str, store: &WorkflowStore) -> Result<(), CompleteComma
         Ok(())
     })?;
 
+    // Non-fatal: publish outcome to Canopy so dashboard reflects terminal state.
+    let outcome = store
+        .get_outcome(&id)
+        .ok()
+        .flatten();
+    if let Some(o) = outcome {
+        if let Ok(json) = serde_json::to_string(&o) {
+            if let Err(e) = std::process::Command::new("canopy")
+                .args(["outcome", "record", "-"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+                .and_then(|mut child| {
+                    use std::io::Write;
+                    if let Some(mut stdin) = child.stdin.take() {
+                        if let Err(e) = stdin.write_all(json.as_bytes()) {
+                            tracing::warn!("failed to write outcome to canopy stdin: {e}");
+                        }
+                    }
+                    child.wait()
+                })
+            {
+                tracing::warn!("failed to publish outcome to Canopy: {e}");
+            }
+        }
+    }
+
     println!("Workflow {workflow_id} completed successfully.");
 
     Ok(())
