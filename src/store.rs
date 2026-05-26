@@ -195,6 +195,15 @@ impl WorkflowStore {
 
         self.ensure_column("workflows", "content_hash", "TEXT")?;
 
+        // Create a partial unique index to prevent duplicate non-terminal workflows
+        // with the same content_hash. This index applies only to non-terminal states,
+        // allowing multiple terminal workflows with the same hash.
+        self.conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_workflows_content_hash_active
+             ON workflows(content_hash)
+             WHERE status NOT IN ('completed', 'failed', 'cancelled', 'user_terminated');",
+        )?;
+
         Ok(())
     }
 
@@ -389,8 +398,13 @@ impl WorkflowStore {
     ///
     /// If a non-terminal workflow with the given hash already exists, returns it.
     /// Otherwise, inserts the new workflow instance and returns it.
-    /// Both operations are atomic within a single transaction to prevent
-    /// concurrent dispatches on the same handoff content from creating duplicates.
+    ///
+    /// Uses INSERT OR IGNORE with a partial UNIQUE index to prevent duplicate
+    /// non-terminal workflows for the same content_hash in concurrent scenarios.
+    /// When multiple writers race to insert the same hash:
+    /// - The first INSERT succeeds and creates the row and phase states.
+    /// - Subsequent INSERTs are silently rejected by the UNIQUE constraint.
+    /// - All writers then SELECT and return the canonical (existing) row.
     ///
     /// # Errors
     ///
@@ -401,7 +415,48 @@ impl WorkflowStore {
         content_hash: &str,
     ) -> Result<WorkflowInstance, StoreError> {
         self.with_transaction::<_, WorkflowInstance, StoreError>(|store| {
-            // Check if a non-terminal workflow with this hash already exists.
+            // Attempt to insert the workflow row using INSERT OR IGNORE.
+            // If the content_hash already has a non-terminal workflow, this is silently rejected.
+            // If the insert succeeds, we also insert the phase states.
+            let template_json = serde_json::to_string(&inst.template)?;
+            let current_phase = inst.current_phase().map(|p| p.phase_id.as_str());
+            let current_phase_idx =
+                i64::try_from(inst.current_phase_idx).map_err(|_| StoreError::InvalidValue {
+                    field: "current_phase_idx",
+                    value: inst.current_phase_idx.to_string(),
+                    reason: format!("value {} exceeds i64::MAX", inst.current_phase_idx),
+                })?;
+
+            let inserted = store.conn.execute(
+                "INSERT OR IGNORE INTO workflows
+                    (workflow_id, template_id, handoff_path, status, current_phase,
+                     current_phase_idx, blocked_on, created_at, updated_at, template_json, content_hash)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    inst.workflow_id.0,
+                    inst.template.template_id,
+                    inst.handoff_path,
+                    inst.status.to_string(),
+                    current_phase,
+                    current_phase_idx,
+                    inst.blocked_on,
+                    inst.created_at.to_rfc3339(),
+                    inst.updated_at.to_rfc3339(),
+                    template_json,
+                    Some(content_hash),
+                ],
+            )?;
+
+            // Only insert phase states if this transaction's INSERT succeeded.
+            if inserted > 0 {
+                for (order, state) in inst.phase_states.iter().enumerate() {
+                    store.upsert_phase_state(&inst.workflow_id, state, order)?;
+                }
+            }
+
+            // Now query for the canonical non-terminal workflow with this hash.
+            // If this transaction's INSERT succeeded, we'll find the row we just inserted.
+            // If our INSERT was rejected due to a concurrent insert, we'll find the existing row.
             let row: Result<String, _> = store.conn.query_row(
                 "SELECT workflow_id FROM workflows
                  WHERE content_hash = ?1
@@ -414,14 +469,16 @@ impl WorkflowStore {
 
             match row {
                 Ok(wf_id) => {
-                    // Existing non-terminal workflow found; return it.
+                    // Return the canonical workflow (either ours or a concurrent writer's).
                     store.get_workflow(&WorkflowId(wf_id.clone()))?
                         .ok_or_else(|| StoreError::NotFound(wf_id))
                 }
                 Err(rusqlite::Error::QueryReturnedNoRows) => {
-                    // No existing workflow; insert the new one.
-                    store.insert_workflow_with_hash(inst, Some(content_hash))?;
-                    Ok(inst.clone())
+                    // This should not happen if the INSERT OR IGNORE worked correctly,
+                    // but we handle it defensively.
+                    Err(StoreError::NotFound(
+                        "no workflow found after insert attempt".to_string(),
+                    ))
                 }
                 Err(e) => Err(StoreError::Sqlite(e)),
             }
