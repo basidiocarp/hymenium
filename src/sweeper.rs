@@ -361,6 +361,10 @@ impl RuntimeRegistry {
     }
 
     /// Transition an active phase to failed with the given reason.
+    ///
+    /// Both the phase state and the parent workflow status are updated atomically.
+    /// Workflows already in a terminal state (completed, cancelled, user_terminated)
+    /// are not overwritten.
     fn fail_phase(
         &self,
         workflow_id: &str,
@@ -368,13 +372,35 @@ impl RuntimeRegistry {
         reason: &str,
         now: DateTime<Utc>,
     ) -> Result<(), SweeperError> {
-        self.conn.execute(
-            "UPDATE phase_states
-             SET status = 'failed', completed_at = ?1, failure_reason = ?2
-             WHERE workflow_id = ?3 AND phase_id = ?4 AND status = 'active'",
-            params![now.to_rfc3339(), reason, workflow_id, phase_id],
-        )?;
-        Ok(())
+        self.conn.execute_batch("BEGIN")?;
+        let result = (|| -> Result<(), SweeperError> {
+            self.conn.execute(
+                "UPDATE phase_states
+                 SET status = 'failed', completed_at = ?1, failure_reason = ?2
+                 WHERE workflow_id = ?3 AND phase_id = ?4 AND status = 'active'",
+                params![now.to_rfc3339(), reason, workflow_id, phase_id],
+            )?;
+            let updated = self.conn.execute(
+                "UPDATE workflows SET status = 'failed', updated_at = ?1
+                 WHERE workflow_id = ?2
+                   AND status NOT IN ('completed', 'cancelled', 'user_terminated')",
+                params![now.to_rfc3339(), workflow_id],
+            )?;
+            if updated == 0 {
+                warn!(workflow_id = %workflow_id, "fail_phase: no non-terminal workflows row found to update");
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(e)
+            }
+        }
     }
 
     /// Reconcile: find active phases whose `agent_id` belongs to an offline
@@ -776,7 +802,20 @@ mod tests {
         // Insert a fake active phase in the phase_states table (in the same db).
         reg.conn
             .execute_batch(
-                "CREATE TABLE IF NOT EXISTS phase_states (
+                "CREATE TABLE IF NOT EXISTS workflows (
+                    workflow_id      TEXT PRIMARY KEY,
+                    template_id      TEXT NOT NULL,
+                    handoff_path     TEXT NOT NULL,
+                    status           TEXT NOT NULL,
+                    current_phase    TEXT,
+                    current_phase_idx INTEGER NOT NULL DEFAULT 0,
+                    blocked_on       TEXT,
+                    created_at       TEXT NOT NULL,
+                    updated_at       TEXT NOT NULL,
+                    template_json    TEXT NOT NULL,
+                    content_hash     TEXT
+                );
+                CREATE TABLE IF NOT EXISTS phase_states (
                     workflow_id    TEXT NOT NULL,
                     phase_id       TEXT NOT NULL,
                     role           TEXT NOT NULL DEFAULT 'implementer',
@@ -790,6 +829,9 @@ mod tests {
                     failure_reason TEXT,
                     PRIMARY KEY (workflow_id, phase_id)
                 );
+                INSERT OR IGNORE INTO workflows
+                    (workflow_id, template_id, handoff_path, status, created_at, updated_at, template_json)
+                VALUES ('wf-1', 'test-template', '/test/handoff.md', 'running', datetime('now'), datetime('now'), '{}');
                 INSERT OR IGNORE INTO phase_states
                     (workflow_id, phase_id, status, agent_id, phase_order)
                 VALUES ('wf-1', 'implement', 'active', 'offline-runtime', 0);",
@@ -826,6 +868,17 @@ mod tests {
             )
             .expect("query reason");
         assert_eq!(reason.as_deref(), Some("runtime went offline"));
+
+        // Verify the workflows row was also updated.
+        let wf_status: String = reg
+            .conn
+            .query_row(
+                "SELECT status FROM workflows WHERE workflow_id = 'wf-1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query workflow status");
+        assert_eq!(wf_status, "failed", "workflows.status must be failed after orphan sweep");
     }
 
     // -----------------------------------------------------------------------
@@ -847,7 +900,20 @@ mod tests {
         // An active phase claimed by that offline runtime.
         reg.conn
             .execute_batch(
-                "CREATE TABLE IF NOT EXISTS phase_states (
+                "CREATE TABLE IF NOT EXISTS workflows (
+                    workflow_id      TEXT PRIMARY KEY,
+                    template_id      TEXT NOT NULL,
+                    handoff_path     TEXT NOT NULL,
+                    status           TEXT NOT NULL,
+                    current_phase    TEXT,
+                    current_phase_idx INTEGER NOT NULL DEFAULT 0,
+                    blocked_on       TEXT,
+                    created_at       TEXT NOT NULL,
+                    updated_at       TEXT NOT NULL,
+                    template_json    TEXT NOT NULL,
+                    content_hash     TEXT
+                );
+                CREATE TABLE IF NOT EXISTS phase_states (
                     workflow_id    TEXT NOT NULL,
                     phase_id       TEXT NOT NULL,
                     role           TEXT NOT NULL DEFAULT 'implementer',
@@ -861,6 +927,9 @@ mod tests {
                     failure_reason TEXT,
                     PRIMARY KEY (workflow_id, phase_id)
                 );
+                INSERT OR IGNORE INTO workflows
+                    (workflow_id, template_id, handoff_path, status, created_at, updated_at, template_json)
+                VALUES ('wf-pre', 'test-template', '/test/handoff.md', 'running', datetime('now'), datetime('now'), '{}');
                 INSERT OR IGNORE INTO phase_states
                     (workflow_id, phase_id, status, agent_id, phase_order)
                 VALUES ('wf-pre', 'audit', 'active', 'pre-offline', 0);",
@@ -883,6 +952,17 @@ mod tests {
             )
             .expect("query");
         assert_eq!(status, "failed");
+
+        // Verify the workflows row was also updated.
+        let wf_status: String = reg
+            .conn
+            .query_row(
+                "SELECT status FROM workflows WHERE workflow_id = 'wf-pre'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("query workflow status");
+        assert_eq!(wf_status, "failed", "workflows.status must be failed after reconciliation sweep");
     }
 
     // -----------------------------------------------------------------------
