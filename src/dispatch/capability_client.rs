@@ -31,7 +31,7 @@ use super::{
 };
 #[cfg(unix)]
 use crate::dispatch::cli::libc_kill;
-use crate::dispatch::cli::{CANOPY_ALLOWED_ENV, CANOPY_TIMEOUT, resolve_canopy_binary};
+use crate::dispatch::cli::{CANOPY_ALLOWED_ENV, canopy_timeout, resolve_canopy_binary};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::io::Write as _;
@@ -373,7 +373,7 @@ impl<C: CanopyClient> CapabilityCanopyClient<C> {
     /// Security properties enforced here (same as `CliCanopyClient::run`):
     /// - The child environment is cleared and only the allowlisted variables
     ///   are restored, preventing secret leakage.
-    /// - A 30-second wall-clock timeout kills the child if it hangs.
+    /// - A configurable wall-clock timeout (default 30s, override via `HYMENIUM_CANOPY_TIMEOUT_SECS`) kills the child if it hangs.
     fn send_dispatch_request(command: &Path, request_json: &str) -> Result<String, DispatchError> {
         // Enforce an absolute path to prevent PATH hijacking by relative binary
         // paths. Absolute paths are validated for existence and used directly;
@@ -422,7 +422,7 @@ impl<C: CanopyClient> CapabilityCanopyClient<C> {
         // A cancellation channel lets the main thread signal the killer before
         // it fires, preventing a PID-reuse race: after wait_with_output() the
         // child PID is freed and could be reused by an unrelated process.
-        let timeout = CANOPY_TIMEOUT;
+        let timeout = canopy_timeout();
         let child_id = child.id();
         let (cancel_tx, cancel_rx) = std::sync::mpsc::channel::<()>();
         let killer = std::thread::spawn(move || {
@@ -452,7 +452,7 @@ impl<C: CanopyClient> CapabilityCanopyClient<C> {
                 use std::os::unix::process::ExitStatusExt as _;
                 if output.status.signal() == Some(libc::SIGKILL) {
                     return Err(DispatchError::CanopyError(
-                        "canopy dispatch timed out after 30s".to_string(),
+                        "canopy dispatch timed out".to_string(),
                     ));
                 }
             }

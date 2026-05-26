@@ -9,8 +9,12 @@ use std::time::Duration;
 // CliCanopyClient
 // ---------------------------------------------------------------------------
 
-/// Timeout applied to every canopy subprocess invocation.
-pub(crate) const CANOPY_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) fn canopy_timeout() -> Duration {
+    std::env::var("HYMENIUM_CANOPY_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map_or(Duration::from_secs(30), Duration::from_secs)
+}
 
 /// Environment variables forwarded to canopy subprocesses.
 ///
@@ -73,7 +77,7 @@ impl CliCanopyClient {
     ///   that a PATH-preferred impostor cannot intercept dispatch payloads.
     /// - The child environment is cleared and only the allowlisted variables
     ///   are restored, preventing secret leakage.
-    /// - A 30-second wall-clock timeout kills the child and waits for it to
+    /// - A configurable wall-clock timeout (default 30s, override via `HYMENIUM_CANOPY_TIMEOUT_SECS`) kills the child and waits for it to
     ///   exit so a hanging canopy process cannot block orchestration
     ///   indefinitely.
     fn run(&self, args: &[&str]) -> Result<String, DispatchError> {
@@ -96,12 +100,12 @@ impl CliCanopyClient {
             .map_err(|e| DispatchError::CanopyError(format!("failed to spawn canopy: {e}")))?;
 
         // Enforce a wall-clock timeout by having a background thread kill the
-        // child if it does not finish within CANOPY_TIMEOUT.
+        // child if it does not finish within the configured timeout.
         //
         // A cancellation channel lets the main thread signal the killer before
         // it fires, preventing a PID-reuse race: after wait_with_output() the
         // child PID is freed and could be reused by an unrelated process.
-        let timeout = CANOPY_TIMEOUT;
+        let timeout = canopy_timeout();
         // SAFETY: `child.id()` returns the OS PID; we use it only to send a
         // signal, which is safe from any thread.
         let child_id = child.id();
@@ -136,7 +140,7 @@ impl CliCanopyClient {
                 use std::os::unix::process::ExitStatusExt as _;
                 if output.status.signal() == Some(libc::SIGKILL) {
                     return Err(DispatchError::CanopyError(
-                        "canopy dispatch timed out after 30s".to_string(),
+                        "canopy dispatch timed out".to_string(),
                     ));
                 }
             }
