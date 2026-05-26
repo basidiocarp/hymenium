@@ -284,12 +284,22 @@ pub fn cancel_task(
         )));
     }
 
-    // Persist the updated phase state.
-    for (order, phase) in instance.phase_states.iter().enumerate() {
-        store
-            .upsert_phase_state(workflow_id, phase, order)
-            .map_err(|e| DispatchError::CanopyError(format!("store error: {e}")))?;
-    }
+    // Persist phase-state update and workflow status atomically. Without a
+    // transaction, a crash between the two writes would leave phases=Failed
+    // but workflow=in_progress, which is an inconsistent observable state.
+    store
+        .with_transaction::<_, _, crate::store::StoreError>(|store| {
+            for (order, phase) in instance.phase_states.iter().enumerate() {
+                store.upsert_phase_state(workflow_id, phase, order)?;
+            }
+            store.update_workflow_status(
+                workflow_id,
+                &crate::workflow::engine::WorkflowStatus::Cancelled,
+                None,
+            )?;
+            Ok(())
+        })
+        .map_err(|e| DispatchError::CanopyError(format!("store error: {e}")))?;
 
     tracing::info!(
         workflow_id = %workflow_id,
@@ -1348,6 +1358,102 @@ mod tests {
             opts[1].phase_id.as_deref(),
             Some("audit"),
             "second subtask must carry phase_id = audit"
+        );
+    }
+
+    // -- cancel_task ----------------------------------------------------------
+
+    /// Open a temporary on-disk `WorkflowStore` for tests in this module.
+    ///
+    /// Uses a unique file path per call so parallel tests do not collide.
+    fn temp_store() -> crate::store::WorkflowStore {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let path = std::env::temp_dir()
+            .join(format!("hymenium_orchestrate_test_{nanos}.db"));
+        crate::store::WorkflowStore::open(&path).expect("open temp store")
+    }
+
+    #[test]
+    fn cancel_task_sets_workflow_status_to_cancelled() {
+        use crate::workflow::engine::{PhaseStatus, WorkflowInstance, WorkflowStatus};
+        use crate::workflow::template::impl_audit_default;
+
+        let store = temp_store();
+        let workflow_id = WorkflowId("wf-cancel-1".to_string());
+
+        // Build a workflow instance and plant a canopy_task_id on the first phase.
+        let mut instance = WorkflowInstance::new(
+            workflow_id.clone(),
+            impl_audit_default(),
+            "/handoffs/test.md",
+        );
+        instance.phase_states[0].canopy_task_id = Some("canopy-task-abc".to_string());
+        instance.phase_states[0].status = PhaseStatus::Active;
+
+        store.insert_workflow(&instance).expect("insert workflow");
+
+        // Confirm initial status is not Cancelled.
+        let before = store
+            .get_workflow(&workflow_id)
+            .expect("get")
+            .expect("should exist");
+        assert_ne!(
+            before.status,
+            WorkflowStatus::Cancelled,
+            "precondition: workflow should not be cancelled before cancel_task"
+        );
+
+        // Execute the cancellation.
+        cancel_task(&workflow_id, "canopy-task-abc", &store)
+            .expect("cancel_task should succeed");
+
+        // The workflow status must now be Cancelled.
+        let after = store
+            .get_workflow(&workflow_id)
+            .expect("get after cancel")
+            .expect("should still exist");
+        assert_eq!(
+            after.status,
+            WorkflowStatus::Cancelled,
+            "workflow status must be Cancelled after cancel_task"
+        );
+
+        // The targeted phase must be marked Failed with the cancellation reason.
+        assert_eq!(
+            after.phase_states[0].status,
+            PhaseStatus::Failed,
+            "cancelled phase must have status Failed"
+        );
+        assert_eq!(
+            after.phase_states[0].failure_reason.as_deref(),
+            Some("task cancelled"),
+            "cancelled phase must carry the failure reason"
+        );
+    }
+
+    #[test]
+    fn cancel_task_returns_error_for_unknown_task_id() {
+        use crate::workflow::engine::WorkflowInstance;
+        use crate::workflow::template::impl_audit_default;
+
+        let store = temp_store();
+        let workflow_id = WorkflowId("wf-cancel-2".to_string());
+
+        let instance = WorkflowInstance::new(
+            workflow_id.clone(),
+            impl_audit_default(),
+            "/handoffs/test.md",
+        );
+        store.insert_workflow(&instance).expect("insert workflow");
+
+        let result = cancel_task(&workflow_id, "no-such-task", &store);
+        assert!(
+            result.is_err(),
+            "cancel_task must error when task_id is not found"
         );
     }
 }
