@@ -593,11 +593,28 @@ impl std::fmt::Debug for Sweeper {
 
 impl Sweeper {
     /// Start the sweeper background thread, opening the runtime registry at
-    /// `db_path` with the default constants.
+    /// `db_path` with timing constants read from environment variables or defaults.
     ///
     /// Returns `Err` if the registry cannot be opened.
+    ///
+    /// Environment variables:
+    /// - `HYMENIUM_SWEEP_INTERVAL_SECS`: sweep interval in seconds (default 30)
+    /// - `HYMENIUM_HEARTBEAT_TIMEOUT_SECS`: heartbeat timeout in seconds (default 45)
+    /// - `HYMENIUM_GC_RETENTION_SECS`: GC retention in seconds (default 604800)
     pub fn start(db_path: PathBuf) -> Result<Self, SweeperError> {
-        Self::start_with(db_path, SWEEP_INTERVAL, HEARTBEAT_TIMEOUT, GC_RETENTION)
+        let sweep_interval = std::env::var("HYMENIUM_SWEEP_INTERVAL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map_or(SWEEP_INTERVAL, Duration::from_secs);
+        let heartbeat_timeout = std::env::var("HYMENIUM_HEARTBEAT_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map_or(HEARTBEAT_TIMEOUT, Duration::from_secs);
+        let gc_retention = std::env::var("HYMENIUM_GC_RETENTION_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map_or(GC_RETENTION, Duration::from_secs);
+        Self::start_with(db_path, sweep_interval, heartbeat_timeout, gc_retention)
     }
 
     /// Start with explicit timing parameters (useful for tests).
