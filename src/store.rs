@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use tracing::warn;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -373,6 +374,10 @@ impl WorkflowStore {
     /// Returns the most recent non-terminal workflow with the given content hash,
     /// or `None` if no such workflow exists. Terminal states are: `completed`,
     /// `failed`, `cancelled`, and `user_terminated`.
+    ///
+    /// If the returned workflow is in `blocked_on_gate`, `awaiting_repair`, or
+    /// `awaiting_user_input` status, a warning is emitted to alert the caller that
+    /// operator intervention may be needed.
     pub fn find_workflow_by_hash(
         &self,
         hash: &str,
@@ -390,7 +395,24 @@ impl WorkflowStore {
         match row {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(StoreError::Sqlite(e)),
-            Ok(wf_id) => self.get_workflow(&WorkflowId(wf_id)),
+            Ok(wf_id) => {
+                let result = self.get_workflow(&WorkflowId(wf_id))?;
+                if let Some(ref wf) = result {
+                    if matches!(
+                        wf.status,
+                        WorkflowStatus::BlockedOnGate
+                            | WorkflowStatus::AwaitingRepair
+                            | WorkflowStatus::AwaitingUserInput
+                    ) {
+                        warn!(
+                            workflow_id = %wf.workflow_id,
+                            status = %wf.status,
+                            "find_workflow_by_hash: returning a non-progressing workflow; operator may need to reconcile or force-advance"
+                        );
+                    }
+                }
+                Ok(result)
+            }
         }
     }
 
@@ -1574,5 +1596,104 @@ mod tests {
             )
             .expect("count hash entries");
         assert_eq!(count, 1, "only one workflow should exist for this hash");
+    }
+
+    // Note: these tests assert that the workflow is returned with the correct status but
+    // do not verify that tracing::warn! fired. Adding a tracing subscriber (e.g.,
+    // tracing-test crate) would allow that verification — deferred as a follow-up.
+
+    #[test]
+    fn test_find_workflow_by_hash_returns_blocked_on_gate_workflow() {
+        let store = temp_store();
+        let inst = make_instance("01JNQWHASH00000000000005");
+        let hash = "blocked123deadbeef";
+
+        store
+            .insert_workflow_with_hash(&inst, Some(hash))
+            .expect("insert with hash");
+
+        // Mark the workflow as blocked on gate
+        store
+            .update_workflow_status(&inst.workflow_id, &WorkflowStatus::BlockedOnGate, Some("gate_condition"))
+            .expect("update status to blocked_on_gate");
+
+        // find_workflow_by_hash should still return the workflow (with a warning emitted)
+        let found = store
+            .find_workflow_by_hash(hash)
+            .expect("query should succeed");
+        assert!(
+            found.is_some(),
+            "should return a blocked_on_gate workflow"
+        );
+        let wf = found.unwrap();
+        assert_eq!(
+            wf.status,
+            WorkflowStatus::BlockedOnGate,
+            "returned workflow should have blocked_on_gate status"
+        );
+        assert_eq!(
+            wf.workflow_id,
+            inst.workflow_id,
+            "returned id should match inserted workflow"
+        );
+    }
+
+    #[test]
+    fn test_find_workflow_by_hash_returns_awaiting_repair_workflow() {
+        let store = temp_store();
+        let inst = make_instance("01JNQWHASH00000000000006");
+        let hash = "repair456cafebabe";
+
+        store
+            .insert_workflow_with_hash(&inst, Some(hash))
+            .expect("insert with hash");
+
+        // Mark the workflow as awaiting repair
+        store
+            .update_workflow_status(&inst.workflow_id, &WorkflowStatus::AwaitingRepair, None)
+            .expect("update status to awaiting_repair");
+
+        // find_workflow_by_hash should still return the workflow (with a warning emitted)
+        let found = store
+            .find_workflow_by_hash(hash)
+            .expect("query should succeed");
+        assert!(
+            found.is_some(),
+            "should return an awaiting_repair workflow"
+        );
+        let wf = found.unwrap();
+        assert_eq!(
+            wf.status,
+            WorkflowStatus::AwaitingRepair,
+            "returned workflow should have awaiting_repair status"
+        );
+        assert_eq!(
+            wf.workflow_id,
+            inst.workflow_id,
+            "returned id should match inserted workflow"
+        );
+    }
+
+    #[test]
+    fn test_find_workflow_by_hash_returns_awaiting_user_input_workflow() {
+        let store = temp_store();
+        let inst = make_instance("01JNQWHASH00000000000007");
+        let hash = "userinput789abcdef";
+
+        store
+            .insert_workflow_with_hash(&inst, Some(hash))
+            .expect("insert with hash");
+
+        store
+            .update_workflow_status(&inst.workflow_id, &WorkflowStatus::AwaitingUserInput, None)
+            .expect("update status to awaiting_user_input");
+
+        let found = store
+            .find_workflow_by_hash(hash)
+            .expect("query should succeed");
+        assert!(found.is_some(), "should return an awaiting_user_input workflow");
+        let wf = found.unwrap();
+        assert_eq!(wf.status, WorkflowStatus::AwaitingUserInput);
+        assert_eq!(wf.workflow_id, inst.workflow_id);
     }
 }
