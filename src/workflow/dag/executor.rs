@@ -42,7 +42,7 @@ impl DagExecutor {
         let result = self.run_inner(dag).await;
 
         // Release the lock, but don't fail the workflow if unlock fails.
-        if let Err(e) = crate::workflow_lock::release_lock() {
+        if let Err(e) = crate::workflow_lock::release_lock(&dag.workflow_id) {
             tracing::warn!("failed to release workflow lock: {}", e);
         }
 

@@ -235,7 +235,7 @@ fn open_store() -> Result<WorkflowStore> {
 /// with the active workflow phase. If no, returns an allow decision.
 /// Always produces valid JSON to stdout; never errors out.
 fn handle_pre_compact_hook() {
-    let response = match hymenium::workflow_lock::read_active_lock() {
+    let response = match hymenium::workflow_lock::find_any_active_lock() {
         Some(lock) => serde_json::json!({
             "decision": "block",
             "reason": format!(

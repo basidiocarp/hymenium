@@ -21,8 +21,8 @@ pub struct WorkflowLock {
 }
 
 /// Get the path to the workflow lock file in the system temp directory.
-fn lock_path() -> PathBuf {
-    std::env::temp_dir().join("hymenium-workflow.lock")
+fn lock_path(workflow_id: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("hymenium-workflow-{workflow_id}.lock"))
 }
 
 /// Check if a process ID is still alive.
@@ -52,7 +52,10 @@ fn is_pid_alive(pid: u32) -> bool {
 /// Lock errors are non-fatal; this function logs warnings but does not propagate
 /// failures. The workflow continues even if the lock cannot be written.
 pub fn acquire_lock(workflow_id: &str, phase: &str) -> Result<()> {
-    let path = lock_path();
+    let path = lock_path(workflow_id);
+    // with_extension replaces the existing extension: "hymenium-workflow-<id>.lock" →
+    // "hymenium-workflow-<id>.lock.tmp". The tmp file intentionally does not match the
+    // "hymenium-workflow-*.lock" glob used by find_any_active_lock.
     let tmp_path = path.with_extension("lock.tmp");
 
     let lock = WorkflowLock {
@@ -78,8 +81,8 @@ pub fn acquire_lock(workflow_id: &str, phase: &str) -> Result<()> {
 ///
 /// Lock removal errors are non-fatal. This function logs warnings but does not
 /// propagate failures.
-pub fn release_lock() -> Result<()> {
-    let path = lock_path();
+pub fn release_lock(workflow_id: &str) -> Result<()> {
+    let path = lock_path(workflow_id);
     if path.exists() {
         fs::remove_file(&path).context("failed to remove lock file")?;
     }
@@ -91,8 +94,8 @@ pub fn release_lock() -> Result<()> {
 /// If the lock file is absent, or if it contains a stale PID (process no longer
 /// exists), this function returns false.
 #[must_use]
-pub fn is_active_lock() -> bool {
-    if let Some(lock) = read_active_lock() {
+pub fn is_active_lock(workflow_id: &str) -> bool {
+    if let Some(lock) = read_active_lock(workflow_id) {
         is_pid_alive(lock.pid)
     } else {
         false
@@ -104,8 +107,8 @@ pub fn is_active_lock() -> bool {
 /// Reads the lock file and checks if the owner process is still alive. Returns
 /// the lock metadata if active, or None if the lock is absent or the PID is stale.
 #[must_use]
-pub fn read_active_lock() -> Option<WorkflowLock> {
-    let path = lock_path();
+pub fn read_active_lock(workflow_id: &str) -> Option<WorkflowLock> {
+    let path = lock_path(workflow_id);
     if !path.exists() {
         return None;
     }
@@ -134,6 +137,38 @@ pub fn read_active_lock() -> Option<WorkflowLock> {
     }
 }
 
+/// Scan the temp directory for any active hymenium workflow lock file.
+///
+/// Returns the first lock found whose PID is still alive. Stale lock files
+/// (with dead PIDs) are cleaned up during the scan.
+#[must_use]
+pub fn find_any_active_lock() -> Option<WorkflowLock> {
+    let tmp = std::env::temp_dir();
+    let Ok(entries) = std::fs::read_dir(&tmp) else {
+        return None;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with("hymenium-workflow-") && name_str.ends_with(".lock") {
+            let Ok(content) = std::fs::read_to_string(entry.path()) else { continue; };
+            match serde_json::from_str::<WorkflowLock>(&content) {
+                Ok(lock) => {
+                    if is_pid_alive(lock.pid) {
+                        return Some(lock);
+                    }
+                    let _ = std::fs::remove_file(entry.path());
+                }
+                Err(_) => {
+                    // Malformed lock file — remove it to avoid repeated scan overhead.
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,28 +183,28 @@ mod tests {
         let _guard = LOCK_TEST_MUTEX.lock().unwrap();
 
         // Clean up any existing lock
-        let _ = release_lock();
+        let _ = release_lock("test-workflow");
 
         // Should not be active initially
-        assert!(!is_active_lock());
+        assert!(!is_active_lock("test-workflow"));
 
         // Acquire a lock
         acquire_lock("test-workflow", "test-phase").expect("failed to acquire lock");
 
         // Should be active now
-        assert!(is_active_lock());
+        assert!(is_active_lock("test-workflow"));
 
         // Lock content should be readable
-        let lock = read_active_lock().expect("failed to read lock");
+        let lock = read_active_lock("test-workflow").expect("failed to read lock");
         assert_eq!(lock.workflow_id, "test-workflow");
         assert_eq!(lock.phase, "test-phase");
         assert_eq!(lock.pid, process::id());
 
         // Release the lock
-        release_lock().expect("failed to release lock");
+        release_lock("test-workflow").expect("failed to release lock");
 
         // Should no longer be active
-        assert!(!is_active_lock());
+        assert!(!is_active_lock("test-workflow"));
     }
 
     #[test]
@@ -177,10 +212,10 @@ mod tests {
         let _guard = LOCK_TEST_MUTEX.lock().unwrap();
 
         // Clean up any existing lock
-        let _ = release_lock();
+        let _ = release_lock("stale-workflow");
 
         // Manually write a lock with an impossible PID
-        let path = lock_path();
+        let path = lock_path("stale-workflow");
         let lock = WorkflowLock {
             pid: 2147483647, // Very large PID that's unlikely to exist
             workflow_id: "stale-workflow".to_string(),
@@ -191,10 +226,10 @@ mod tests {
         fs::write(&path, json).expect("failed to write lock");
 
         // The lock should be detected as stale
-        assert!(!is_active_lock());
+        assert!(!is_active_lock("stale-workflow"));
 
         // Clean up
-        let _ = release_lock();
+        let _ = release_lock("stale-workflow");
     }
 
     #[test]
@@ -202,9 +237,9 @@ mod tests {
         let _guard = LOCK_TEST_MUTEX.lock().unwrap();
 
         // Clean up any existing lock
-        let _ = release_lock();
+        let _ = release_lock("test-workflow-3");
 
         // No lock file should mean is_active_lock returns false
-        assert!(!is_active_lock());
+        assert!(!is_active_lock("test-workflow-3"));
     }
 }
