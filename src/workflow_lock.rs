@@ -151,7 +151,9 @@ pub fn find_any_active_lock() -> Option<WorkflowLock> {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         if name_str.starts_with("hymenium-workflow-") && name_str.ends_with(".lock") {
-            let Ok(content) = std::fs::read_to_string(entry.path()) else { continue; };
+            let Ok(content) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
             match serde_json::from_str::<WorkflowLock>(&content) {
                 Ok(lock) => {
                     if is_pid_alive(lock.pid) {

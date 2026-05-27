@@ -98,10 +98,7 @@ pub fn run(workflow_id: &str, store: &WorkflowStore) -> Result<(), CompleteComma
     })?;
 
     // Non-fatal: publish outcome to Canopy so dashboard reflects terminal state.
-    let outcome = store
-        .get_outcome(&id)
-        .ok()
-        .flatten();
+    let outcome = store.get_outcome(&id).ok().flatten();
     if let Some(o) = outcome {
         if let Ok(json) = serde_json::to_string(&o) {
             if let Err(e) = std::process::Command::new("canopy")

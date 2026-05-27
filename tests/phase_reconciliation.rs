@@ -495,7 +495,10 @@ fn evidence_gate_blocks_advance_when_code_diff_and_verification_absent() {
     assert!(
         matches!(
             result.outcomes[0],
-            PhaseReconcileOutcome::MarkedCompleted { advanced: false, .. }
+            PhaseReconcileOutcome::MarkedCompleted {
+                advanced: false,
+                ..
+            }
         ),
         "expected MarkedCompleted with advanced=false, got: {:?}",
         result.outcomes[0]

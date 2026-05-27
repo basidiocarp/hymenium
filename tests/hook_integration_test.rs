@@ -19,7 +19,9 @@ mod hook_integration_tests {
     fn test_hook_blocks_with_active_lock() {
         let _m = HOOK_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let lock_path = std::env::temp_dir().join("hymenium-workflow-test-workflow.lock");
-        let _cleanup = LockGuard { path: lock_path.clone() };
+        let _cleanup = LockGuard {
+            path: lock_path.clone(),
+        };
 
         let _ = fs::remove_file(&lock_path);
 
@@ -30,7 +32,15 @@ mod hook_integration_tests {
         fs::write(&lock_path, &lock_content).expect("failed to write lock");
 
         let output = Command::new("cargo")
-            .args(["run", "--quiet", "--bin", "hymenium", "--", "hook", "pre-compact"])
+            .args([
+                "run",
+                "--quiet",
+                "--bin",
+                "hymenium",
+                "--",
+                "hook",
+                "pre-compact",
+            ])
             .output()
             .expect("failed to run hook");
 
@@ -57,7 +67,15 @@ mod hook_integration_tests {
         }
 
         let output = Command::new("cargo")
-            .args(["run", "--quiet", "--bin", "hymenium", "--", "hook", "pre-compact"])
+            .args([
+                "run",
+                "--quiet",
+                "--bin",
+                "hymenium",
+                "--",
+                "hook",
+                "pre-compact",
+            ])
             .output()
             .expect("failed to run hook");
 

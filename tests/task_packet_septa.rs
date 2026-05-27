@@ -35,7 +35,10 @@ fn task_packet_covers_all_septa_required_fields() {
     let obj = value.as_object().expect("root is object");
 
     for field in SEPTA_REQUIRED_FIELDS {
-        assert!(obj.contains_key(*field), "missing required septa field: {field}");
+        assert!(
+            obj.contains_key(*field),
+            "missing required septa field: {field}"
+        );
     }
 }
 
@@ -54,8 +57,14 @@ fn task_packet_capability_requirements_has_septa_required_subfields() {
     let value: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&packet).unwrap()).unwrap();
     let cap = &value["capability_requirements"];
-    assert!(cap.get("tier").is_some(), "capability_requirements.tier missing");
-    assert!(cap.get("tools").is_some(), "capability_requirements.tools missing");
+    assert!(
+        cap.get("tier").is_some(),
+        "capability_requirements.tier missing"
+    );
+    assert!(
+        cap.get("tools").is_some(),
+        "capability_requirements.tools missing"
+    );
     // septa capability_requirements disallows additionalProperties
     let cap_obj = cap.as_object().unwrap();
     assert_eq!(

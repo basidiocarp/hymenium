@@ -1578,9 +1578,7 @@ mod tests {
             .expect("inst1 should exist");
         assert_eq!(inst1_from_db.workflow_id, inst1.workflow_id);
 
-        let inst2_from_db = store
-            .get_workflow(&inst2.workflow_id)
-            .expect("get inst2");
+        let inst2_from_db = store.get_workflow(&inst2.workflow_id).expect("get inst2");
         assert!(
             inst2_from_db.is_none(),
             "inst2 should not have been inserted"
@@ -1614,17 +1612,18 @@ mod tests {
 
         // Mark the workflow as blocked on gate
         store
-            .update_workflow_status(&inst.workflow_id, &WorkflowStatus::BlockedOnGate, Some("gate_condition"))
+            .update_workflow_status(
+                &inst.workflow_id,
+                &WorkflowStatus::BlockedOnGate,
+                Some("gate_condition"),
+            )
             .expect("update status to blocked_on_gate");
 
         // find_workflow_by_hash should still return the workflow (with a warning emitted)
         let found = store
             .find_workflow_by_hash(hash)
             .expect("query should succeed");
-        assert!(
-            found.is_some(),
-            "should return a blocked_on_gate workflow"
-        );
+        assert!(found.is_some(), "should return a blocked_on_gate workflow");
         let wf = found.unwrap();
         assert_eq!(
             wf.status,
@@ -1632,8 +1631,7 @@ mod tests {
             "returned workflow should have blocked_on_gate status"
         );
         assert_eq!(
-            wf.workflow_id,
-            inst.workflow_id,
+            wf.workflow_id, inst.workflow_id,
             "returned id should match inserted workflow"
         );
     }
@@ -1657,10 +1655,7 @@ mod tests {
         let found = store
             .find_workflow_by_hash(hash)
             .expect("query should succeed");
-        assert!(
-            found.is_some(),
-            "should return an awaiting_repair workflow"
-        );
+        assert!(found.is_some(), "should return an awaiting_repair workflow");
         let wf = found.unwrap();
         assert_eq!(
             wf.status,
@@ -1668,8 +1663,7 @@ mod tests {
             "returned workflow should have awaiting_repair status"
         );
         assert_eq!(
-            wf.workflow_id,
-            inst.workflow_id,
+            wf.workflow_id, inst.workflow_id,
             "returned id should match inserted workflow"
         );
     }
@@ -1691,7 +1685,10 @@ mod tests {
         let found = store
             .find_workflow_by_hash(hash)
             .expect("query should succeed");
-        assert!(found.is_some(), "should return an awaiting_user_input workflow");
+        assert!(
+            found.is_some(),
+            "should return an awaiting_user_input workflow"
+        );
         let wf = found.unwrap();
         assert_eq!(wf.status, WorkflowStatus::AwaitingUserInput);
         assert_eq!(wf.workflow_id, inst.workflow_id);

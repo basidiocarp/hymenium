@@ -895,7 +895,10 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("query workflow status");
-        assert_eq!(wf_status, "failed", "workflows.status must be failed after orphan sweep");
+        assert_eq!(
+            wf_status, "failed",
+            "workflows.status must be failed after orphan sweep"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -979,7 +982,10 @@ mod tests {
                 |r| r.get(0),
             )
             .expect("query workflow status");
-        assert_eq!(wf_status, "failed", "workflows.status must be failed after reconciliation sweep");
+        assert_eq!(
+            wf_status, "failed",
+            "workflows.status must be failed after reconciliation sweep"
+        );
     }
 
     // -----------------------------------------------------------------------

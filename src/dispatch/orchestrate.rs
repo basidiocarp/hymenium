@@ -1372,8 +1372,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .subsec_nanos();
-        let path = std::env::temp_dir()
-            .join(format!("hymenium_orchestrate_test_{nanos}.db"));
+        let path = std::env::temp_dir().join(format!("hymenium_orchestrate_test_{nanos}.db"));
         crate::store::WorkflowStore::open(&path).expect("open temp store")
     }
 
@@ -1408,8 +1407,7 @@ mod tests {
         );
 
         // Execute the cancellation.
-        cancel_task(&workflow_id, "canopy-task-abc", &store)
-            .expect("cancel_task should succeed");
+        cancel_task(&workflow_id, "canopy-task-abc", &store).expect("cancel_task should succeed");
 
         // The workflow status must now be Cancelled.
         let after = store

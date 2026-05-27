@@ -268,7 +268,6 @@ pub fn reconcile_phases(
     canopy: &dyn CanopyClient,
     force_advance: bool,
 ) -> Result<ReconcileResult, DispatchError> {
-
     let phase_count = instance.phase_states.len();
     let mut outcomes = Vec::with_capacity(phase_count);
 

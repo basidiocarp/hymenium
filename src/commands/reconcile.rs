@@ -278,12 +278,20 @@ mod tests {
 
         impl CanopyClient for NoEvidenceMock {
             fn create_task(
-                &self, _: &str, _: &str, _: &str, _: &TaskOptions,
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: &TaskOptions,
             ) -> Result<String, DispatchError> {
                 Err(DispatchError::CanopyError("not implemented".into()))
             }
             fn create_subtask(
-                &self, _: &str, _: &str, _: &str, _: &TaskOptions,
+                &self,
+                _: &str,
+                _: &str,
+                _: &str,
+                _: &TaskOptions,
             ) -> Result<String, DispatchError> {
                 Err(DispatchError::CanopyError("not implemented".into()))
             }
@@ -311,7 +319,9 @@ mod tests {
                 })
             }
             fn import_handoff(
-                &self, _: &str, _: Option<&str>,
+                &self,
+                _: &str,
+                _: Option<&str>,
             ) -> Result<ImportResult, DispatchError> {
                 Err(DispatchError::CanopyError("not implemented".into()))
             }
