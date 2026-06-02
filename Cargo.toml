@@ -21,7 +21,7 @@ serde_yaml = "0.9"
 spore = { git = "https://github.com/basidiocarp/spore", rev = "85414a54afc16597297f6cd42edec5985474d767" }
 thiserror = "2"
 rusqlite = { version = "0.39", features = ["bundled"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time"] }
 tracing = "0.1"
 ulid = "1"
 toml = "1"

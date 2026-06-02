@@ -250,13 +250,28 @@ async fn execute_node(
     match node {
         DagNode::Bash(bash_node) => {
             let expanded_cmd = expand_variables(&bash_node.command, &env, &prior_results);
-            match tokio::process::Command::new("sh")
+            let output_future = tokio::process::Command::new("sh")
                 .arg("-c")
                 .arg(&expanded_cmd)
                 .envs(env.clone())
-                .output()
-                .await
-            {
+                .kill_on_drop(true)
+                .output();
+
+            let output_result = match bash_node.idle_timeout {
+                Some(dur) => match tokio::time::timeout(dur, output_future).await {
+                    Ok(inner) => inner,
+                    Err(_elapsed) => {
+                        return Ok(NodeResult {
+                            node_id: bash_node.id.clone(),
+                            status: NodeStatus::Failed,
+                            output: format!("node timed out after {dur:?}"),
+                        });
+                    }
+                },
+                None => output_future.await,
+            };
+
+            match output_result {
                 Ok(output) => {
                     let success = output.status.success();
                     let output_str = String::from_utf8_lossy(&output.stdout).to_string();
@@ -285,8 +300,24 @@ async fn execute_node(
                     let expanded = expand_variables(arg, &env, &prior_results);
                     cmd.arg(expanded);
                 }
+                cmd.kill_on_drop(true);
 
-                match cmd.output().await {
+                let output_future = cmd.output();
+                let output_result = match cmd_node.idle_timeout {
+                    Some(dur) => match tokio::time::timeout(dur, output_future).await {
+                        Ok(inner) => inner,
+                        Err(_elapsed) => {
+                            return Ok(NodeResult {
+                                node_id: cmd_node.id.clone(),
+                                status: NodeStatus::Failed,
+                                output: format!("node timed out after {dur:?}"),
+                            });
+                        }
+                    },
+                    None => output_future.await,
+                };
+
+                match output_result {
                     Ok(output) => {
                         let success = output.status.success();
                         let output_str = String::from_utf8_lossy(&output.stdout).to_string();
@@ -389,7 +420,7 @@ fn expand_variables(
 mod tests {
     use super::*;
     use crate::workflow::dag::loader::DagEdge;
-    use crate::workflow::dag::node::{CommandNode, TriggerRule};
+    use crate::workflow::dag::node::{BashNode, CommandNode, TriggerRule};
 
     #[tokio::test]
     async fn test_simple_linear_dag() {
@@ -403,12 +434,14 @@ mod tests {
                     skill: "true".to_string(),
                     args: vec![],
                     trigger_rule: TriggerRule::AllSuccess,
+                    idle_timeout: None,
                 }),
                 DagNode::Command(CommandNode {
                     id: "node-b".to_string(),
                     skill: "true".to_string(),
                     args: vec![],
                     trigger_rule: TriggerRule::AllSuccess,
+                    idle_timeout: None,
                 }),
             ],
             edges: vec![DagEdge {
@@ -445,18 +478,21 @@ mod tests {
                     skill: "true".to_string(),
                     args: vec![],
                     trigger_rule: TriggerRule::AllSuccess,
+                    idle_timeout: None,
                 }),
                 DagNode::Command(CommandNode {
                     id: "review-errors".to_string(),
                     skill: "true".to_string(),
                     args: vec![],
                     trigger_rule: TriggerRule::AllSuccess,
+                    idle_timeout: None,
                 }),
                 DagNode::Command(CommandNode {
                     id: "review-tests".to_string(),
                     skill: "true".to_string(),
                     args: vec![],
                     trigger_rule: TriggerRule::AllSuccess,
+                    idle_timeout: None,
                 }),
                 DagNode::Prompt(crate::workflow::dag::node::PromptNode {
                     id: "synthesize".to_string(),
@@ -535,5 +571,82 @@ mod tests {
         let text = "Got: $node-a.output and $KEY";
         let expanded = expand_variables(text, &env, &results);
         assert_eq!(expanded, "Got: output from a and $KEY");
+    }
+
+    #[tokio::test]
+    async fn test_idle_timeout_zero_output_fails() {
+        let dag = WorkflowDag {
+            workflow_id: "timeout-test".to_string(),
+            name: "Timeout Test".to_string(),
+            description: "Test timeout behavior".to_string(),
+            nodes: vec![DagNode::Bash(BashNode {
+                id: "slow".to_string(),
+                command: "sleep 5".to_string(),
+                trigger_rule: TriggerRule::AllSuccess,
+                idle_timeout: Some(std::time::Duration::from_millis(100)),
+            })],
+            edges: vec![],
+            env: HashMap::new(),
+        };
+
+        let executor = DagExecutor {
+            env: HashMap::new(),
+        };
+
+        let results = executor.run(&dag).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].node_id, "slow");
+        assert_eq!(results[0].status, NodeStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn test_timeout_node_blocks_downstream() {
+        // Build a 2-node DAG: "slow" times out, "after" depends on it with AllSuccess trigger
+        let dag = WorkflowDag {
+            workflow_id: "timeout-blocks-test".to_string(),
+            name: "Timeout Blocks Downstream".to_string(),
+            description: "Test that a timed-out node blocks AllSuccess successors".to_string(),
+            nodes: vec![
+                DagNode::Bash(BashNode {
+                    id: "slow".to_string(),
+                    command: "sleep 5".to_string(),
+                    trigger_rule: TriggerRule::AllSuccess,
+                    idle_timeout: Some(std::time::Duration::from_millis(100)),
+                }),
+                DagNode::Command(CommandNode {
+                    id: "after".to_string(),
+                    skill: "true".to_string(),
+                    args: vec![],
+                    trigger_rule: TriggerRule::AllSuccess,
+                    idle_timeout: None,
+                }),
+            ],
+            edges: vec![DagEdge {
+                from: "slow".to_string(),
+                to: "after".to_string(),
+            }],
+            env: HashMap::new(),
+        };
+
+        let executor = DagExecutor {
+            env: HashMap::new(),
+        };
+
+        let results = executor.run(&dag).await.unwrap();
+        assert_eq!(results.len(), 2);
+
+        // "slow" should fail due to timeout
+        let slow_result = results
+            .iter()
+            .find(|r| r.node_id == "slow")
+            .expect("slow node not found");
+        assert_eq!(slow_result.status, NodeStatus::Failed);
+
+        // "after" should be skipped because its AllSuccess predecessor failed
+        let after_result = results
+            .iter()
+            .find(|r| r.node_id == "after")
+            .expect("after node not found");
+        assert_eq!(after_result.status, NodeStatus::Skipped);
     }
 }

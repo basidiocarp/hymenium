@@ -2,6 +2,26 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Serde helper: represent `Option<Duration>` as an optional integer number of seconds
+/// in workflow files (e.g. `idle_timeout: 30`), mirroring `monitor::duration_secs`.
+mod option_duration_secs {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::time::Duration;
+
+    #[allow(clippy::ref_option)]
+    pub fn serialize<S: Serializer>(d: &Option<Duration>, s: S) -> Result<S::Ok, S::Error> {
+        match d {
+            Some(dur) => dur.as_secs().serialize(s),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
+        let secs: Option<u64> = Option::deserialize(d)?;
+        Ok(secs.map(Duration::from_secs))
+    }
+}
+
 /// Typed node kind enum for DAG workflows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -75,6 +95,8 @@ pub struct BashNode {
     pub command: String,
     #[serde(default)]
     pub trigger_rule: TriggerRule,
+    #[serde(default, with = "option_duration_secs")]
+    pub idle_timeout: Option<std::time::Duration>,
 }
 
 /// Loop node: repeatedly calls a prompt until a condition is met.
@@ -106,6 +128,8 @@ pub struct CommandNode {
     pub args: Vec<String>,
     #[serde(default)]
     pub trigger_rule: TriggerRule,
+    #[serde(default, with = "option_duration_secs")]
+    pub idle_timeout: Option<std::time::Duration>,
 }
 
 /// Approval node: prompts the operator for yes/no approval.
