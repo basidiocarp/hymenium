@@ -2,8 +2,267 @@ use super::{
     CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail, TaskOptions,
 };
 use crate::workflow::template::AgentRole;
+use std::io::{BufRead as _, Write as _};
 use std::path::PathBuf;
 use std::time::Duration;
+
+// ---------------------------------------------------------------------------
+// Wire mirror types for canopy-task-detail-v1
+// ---------------------------------------------------------------------------
+
+/// Deserialize-only mirror of the nested `task` object in `canopy-task-detail-v1`.
+///
+/// Field names match canopy's wire format exactly. The flat `TaskDetail` struct
+/// uses different names (`agent_id`, `parent_id`) — `map_wire_to_detail` handles
+/// the renaming so both the socket and CLI-fallback paths share the same mapping.
+#[derive(serde::Deserialize)]
+struct TaskWireMirror {
+    task_id: String,
+    title: String,
+    status: String,
+    #[serde(default)]
+    owner_agent_id: Option<String>,
+    #[serde(default)]
+    parent_task_id: Option<String>,
+    #[serde(default)]
+    required_capabilities: Vec<String>,
+    #[serde(default)]
+    has_code_diff: bool,
+    #[serde(default)]
+    has_verification_passed: bool,
+}
+
+/// Deserialize-only mirror of the top-level `canopy-task-detail-v1` payload.
+///
+/// Only the fields hymenium reads are present. Unknown fields are ignored via
+/// the default serde behaviour so fixture additions do not break parsing.
+#[derive(serde::Deserialize)]
+struct TaskDetailWireMirror {
+    task: TaskWireMirror,
+    #[serde(default)]
+    completion_signal: Option<serde_json::Value>,
+}
+
+/// Map the nested wire mirror into the flat `TaskDetail` struct used internally.
+///
+/// Centralised here so the socket path and the CLI-fallback path produce identical
+/// output rather than each having its own field mapping.
+fn map_wire_to_detail(wire: TaskDetailWireMirror) -> TaskDetail {
+    let _ = wire.completion_signal; // consumed but not yet surfaced in TaskDetail
+    TaskDetail {
+        task_id: wire.task.task_id,
+        title: wire.task.title,
+        status: wire.task.status,
+        agent_id: wire.task.owner_agent_id,
+        parent_id: wire.task.parent_task_id,
+        required_capabilities: wire.task.required_capabilities,
+        has_code_diff: wire.task.has_code_diff,
+        has_verification_passed: wire.task.has_verification_passed,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JSON-RPC envelope shapes from canopy's socket server
+// ---------------------------------------------------------------------------
+
+/// Deserialize-only mirror of canopy's JSON-RPC 2.0 response envelope.
+///
+/// Canopy's socket server (`socket_server.rs`) rewrites handler errors into a
+/// top-level JSON-RPC error object: `{"jsonrpc":"2.0","id":..,"error":{"code",-32000,"message":"..."}}`.
+/// Successful responses carry `{"jsonrpc":"2.0","id":..,"result":<payload>}`.
+/// The two fields are mutually exclusive in practice, but both are `Option` so
+/// that a partial or unexpected envelope does not cause a hard deserialize
+/// failure — the parser below handles the missing-field cases explicitly.
+#[derive(serde::Deserialize)]
+struct CanopyRpcResult {
+    result: Option<serde_json::Value>,
+    error: Option<serde_json::Value>,
+}
+
+// ---------------------------------------------------------------------------
+// Socket path resolution
+// ---------------------------------------------------------------------------
+
+/// Resolve the unix-socket path for the canopy JSON-RPC server.
+///
+/// Resolution order:
+/// 1. `HYMENIUM_CANOPY_SOCKET` env var (explicit override)
+/// 2. Canopy descriptor file: `<config_dir("canopy")>/canopy.endpoint.json` → `.endpoint`
+/// 3. Default: `<data_dir("basidiocarp")>/canopy/canopy.sock`
+///
+/// Returns `None` on any resolution failure (missing env, unreadable descriptor,
+/// or platform path unavailable). The caller falls back to the CLI path when
+/// `None` is returned.
+fn resolve_canopy_socket() -> Option<PathBuf> {
+    // 1. Explicit env override.
+    if let Ok(p) = std::env::var("HYMENIUM_CANOPY_SOCKET") {
+        if !p.is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+
+    // 2. Canopy descriptor file.
+    if let Ok(config_dir) = spore::paths::config_dir("canopy") {
+        let descriptor = config_dir.join("canopy.endpoint.json");
+        if let Ok(content) = std::fs::read_to_string(&descriptor) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(endpoint) = v.get("endpoint").and_then(serde_json::Value::as_str) {
+                    if !endpoint.is_empty() {
+                        return Some(PathBuf::from(endpoint));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Default socket path.
+    if let Ok(data_dir) = spore::paths::data_dir("basidiocarp") {
+        return Some(data_dir.join("canopy").join("canopy.sock"));
+    }
+
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Socket JSON-RPC client
+// ---------------------------------------------------------------------------
+
+/// Send a `canopy_task` JSON-RPC request over a unix domain socket and parse
+/// the `TaskDetailWireMirror` from the response.
+///
+/// Writes a single newline-delimited request, reads one newline-delimited
+/// response, and handles canopy's JSON-RPC 2.0 error envelope where
+/// task-not-found is returned as a top-level `error` object
+/// (`{"jsonrpc":"2.0","id":..,"error":{"code":-32000,"message":"..."}}`)
+/// rather than a value inside `result`.
+///
+/// Returns `Err(DispatchError::CanopyError)` on any I/O, framing, or
+/// application-level error so the caller can fall back to the CLI path.
+#[cfg(unix)]
+fn socket_get_task(socket_path: &std::path::Path, task_id: &str) -> Result<TaskDetailWireMirror, DispatchError> {
+    use std::os::unix::net::UnixStream;
+
+    let mut stream = UnixStream::connect(socket_path).map_err(|e| {
+        DispatchError::CanopyError(format!(
+            "canopy socket connect failed ({}): {e}",
+            socket_path.display()
+        ))
+    })?;
+
+    // Set read and write timeouts matching the global canopy timeout so the
+    // socket path cannot block longer than the CLI path would in either
+    // direction.
+    let timeout = canopy_timeout();
+    stream.set_read_timeout(Some(timeout)).map_err(|e| {
+        DispatchError::CanopyError(format!("canopy socket set_read_timeout: {e}"))
+    })?;
+    stream.set_write_timeout(Some(timeout)).map_err(|e| {
+        DispatchError::CanopyError(format!("canopy socket set_write_timeout: {e}"))
+    })?;
+
+    // Build the request via serde_json so task_id values containing `"`, `\`,
+    // or newlines cannot produce malformed JSON or inject a second framing line.
+    let request_value = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "canopy_task",
+        "params": { "task_id": task_id }
+    });
+    let request = serde_json::to_string(&request_value).map_err(|e| {
+        DispatchError::CanopyError(format!("canopy socket request serialize: {e}"))
+    })? + "\n";
+    stream.write_all(request.as_bytes()).map_err(|e| {
+        DispatchError::CanopyError(format!("canopy socket write: {e}"))
+    })?;
+    stream.flush().map_err(|e| {
+        DispatchError::CanopyError(format!("canopy socket flush: {e}"))
+    })?;
+
+    let mut response_line = String::new();
+    let mut reader = std::io::BufReader::new(&stream);
+    reader.read_line(&mut response_line).map_err(|e| {
+        DispatchError::CanopyError(format!("canopy socket read: {e}"))
+    })?;
+
+    parse_canopy_rpc_response(&response_line)
+}
+
+/// Parse a raw JSON-RPC response line from canopy into a `TaskDetailWireMirror`.
+///
+/// Canopy's socket server uses standard JSON-RPC 2.0 error envelopes for
+/// application-level failures such as task-not-found:
+///
+/// ```json
+/// {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"task detail: not found"}}
+/// ```
+///
+/// Successful responses carry the task payload in `result`:
+///
+/// ```json
+/// {"jsonrpc":"2.0","id":1,"result":{<TaskDetailWire payload>}}
+/// ```
+///
+/// Resolution order:
+/// 1. Top-level `error` present → surface `error.message` as `DispatchError::CanopyError`.
+///    This is the primary path for task-not-found and other handler errors.
+/// 2. Top-level `result` present:
+///    a. Check for a nested `result.error` string as a secondary/defensive path
+///       (canopy does not use this shape, but the check is harmless).
+///    b. Deserialize `result` as `TaskDetailWireMirror`.
+/// 3. Neither field present → parse error.
+fn parse_canopy_rpc_response(line: &str) -> Result<TaskDetailWireMirror, DispatchError> {
+    let rpc: CanopyRpcResult = serde_json::from_str(line.trim()).map_err(|e| {
+        DispatchError::CanopyError(format!("canopy socket response parse: {e}"))
+    })?;
+
+    // Primary path: top-level JSON-RPC error envelope (real canopy not-found shape).
+    if let Some(err_obj) = &rpc.error {
+        let message = err_obj
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| err_obj.to_string());
+        return Err(DispatchError::CanopyError(format!("canopy: {message}")));
+    }
+
+    let result = rpc.result.ok_or_else(|| {
+        DispatchError::CanopyError(
+            "canopy socket response missing both 'result' and 'error' fields".to_string(),
+        )
+    })?;
+
+    // Secondary/defensive path: nested result.error string.
+    // Canopy does not emit this shape, but the check costs nothing and guards
+    // against future protocol surprises.
+    if let Some(err_str) = result.get("error").and_then(serde_json::Value::as_str) {
+        return Err(DispatchError::CanopyError(format!("canopy: {err_str}")));
+    }
+
+    serde_json::from_value::<TaskDetailWireMirror>(result).map_err(|e| {
+        DispatchError::CanopyError(format!("canopy task detail deserialize: {e}"))
+    })
+}
+
+/// Parse a `TaskDetailWireMirror` from a JSON string (used for the CLI-fallback
+/// path where the raw stdout from `canopy api task --task-id` is passed in).
+///
+/// The CLI stdout is the same nested `TaskDetailWireMirror` shape as the socket
+/// result payload, so the same struct and mapping apply.
+fn parse_task_detail_from_json(json: &str) -> Result<TaskDetailWireMirror, DispatchError> {
+    // Check for an inline error field at the top level (mirrors the socket
+    // error-in-result encoding for CLI consumers).
+    let value: serde_json::Value = serde_json::from_str(json.trim()).map_err(|e| {
+        DispatchError::CanopyError(format!("failed to parse task detail: {e}"))
+    })?;
+
+    if let Some(err_str) = value.get("error").and_then(serde_json::Value::as_str) {
+        return Err(DispatchError::CanopyError(format!("canopy: {err_str}")));
+    }
+
+    serde_json::from_value::<TaskDetailWireMirror>(value).map_err(|e| {
+        DispatchError::CanopyError(format!("failed to parse task detail: {e}"))
+    })
+}
 
 // ---------------------------------------------------------------------------
 // CliCanopyClient
@@ -355,9 +614,28 @@ impl CanopyClient for CliCanopyClient {
     }
 
     fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
-        let json = self.run(&["task", "get", task_id, "--json"])?;
-        serde_json::from_str(&json)
-            .map_err(|e| DispatchError::CanopyError(format!("failed to parse task detail: {e}")))
+        // Try the unix-socket JSON-RPC path first (lower latency, no subprocess).
+        // Any socket failure — env missing, descriptor absent, connect refused,
+        // parse error — falls through to the CLI fallback.
+        #[cfg(unix)]
+        if let Some(socket_path) = resolve_canopy_socket() {
+            match socket_get_task(&socket_path, task_id) {
+                Ok(wire) => return Ok(map_wire_to_detail(wire)),
+                Err(e) => {
+                    tracing::debug!(
+                        error = %e,
+                        socket = %socket_path.display(),
+                        "canopy socket get_task failed; falling back to CLI"
+                    );
+                }
+            }
+        }
+
+        // CLI fallback: `canopy api task --task-id <id>`.
+        // Parses the same nested TaskDetailWireMirror shape as the socket path.
+        let json = self.run(&["api", "task", "--task-id", task_id])?;
+        let wire = parse_task_detail_from_json(&json)?;
+        Ok(map_wire_to_detail(wire))
     }
 
     fn check_completeness(&self, handoff_path: &str) -> Result<CompletenessReport, DispatchError> {
@@ -699,6 +977,138 @@ mod tests {
             !args.iter().any(|a| a == "--phase-id"),
             "--phase-id must not appear when not set"
         );
+    }
+
+    // -- round-trip test against the real septa fixture ---------------------------
+
+    /// Deserialize the canonical septa `canopy-task-detail-v1` fixture into
+    /// `TaskDetailWireMirror`, map it to `TaskDetail`, and assert the expected
+    /// field values.
+    ///
+    /// This test exercises the full parse-and-map path without any mocks, proving
+    /// that the wire mirror and mapping function are compatible with the
+    /// authoritative contract fixture.
+    #[test]
+    fn septa_fixture_round_trip_parses_and_maps_to_task_detail() {
+        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../septa/fixtures/canopy-task-detail-v1.example.json");
+
+        let content = std::fs::read_to_string(&fixture_path).unwrap_or_else(|e| {
+            panic!(
+                "failed to read septa fixture at {}: {e}",
+                fixture_path.display()
+            )
+        });
+
+        // Parse into the wire mirror (simulates what both socket and CLI paths do).
+        let wire: TaskDetailWireMirror = serde_json::from_str(&content)
+            .unwrap_or_else(|e| panic!("fixture deserialization failed: {e}"));
+
+        let detail = map_wire_to_detail(wire);
+
+        assert_eq!(
+            detail.task_id, "01JNQABC0123456789GHFEDCBA",
+            "task_id must match fixture"
+        );
+        assert_eq!(detail.status, "open", "status must match fixture");
+        assert!(!detail.has_code_diff, "has_code_diff must be false per fixture");
+        assert!(
+            !detail.has_verification_passed,
+            "has_verification_passed must be false per fixture"
+        );
+    }
+
+    /// Prove that `map_wire_to_detail` correctly renames `owner_agent_id` →
+    /// `agent_id` and `parent_task_id` → `parent_id` when both fields are
+    /// present (non-None).  The septa fixture omits these fields, so the
+    /// round-trip test only exercises the absent-field path; this test covers
+    /// the remap path explicitly.
+    #[test]
+    fn map_wire_to_detail_remaps_agent_id_and_parent_id_when_present() {
+        let json = r#"{
+            "task": {
+                "task_id": "01TASK",
+                "title": "remap test",
+                "status": "in_progress",
+                "owner_agent_id": "agent-abc",
+                "parent_task_id": "parent-xyz",
+                "has_code_diff": true,
+                "has_verification_passed": true
+            }
+        }"#;
+
+        let wire: TaskDetailWireMirror =
+            serde_json::from_str(json).expect("inline fixture must deserialize");
+        let detail = map_wire_to_detail(wire);
+
+        assert_eq!(
+            detail.agent_id,
+            Some("agent-abc".to_string()),
+            "owner_agent_id must be remapped to agent_id"
+        );
+        assert_eq!(
+            detail.parent_id,
+            Some("parent-xyz".to_string()),
+            "parent_task_id must be remapped to parent_id"
+        );
+        assert!(detail.has_code_diff, "has_code_diff must be true");
+        assert!(
+            detail.has_verification_passed,
+            "has_verification_passed must be true"
+        );
+    }
+
+    // -- parse_canopy_rpc_response envelope tests ----------------------------------
+
+    /// Prove that the real canopy not-found envelope — a top-level JSON-RPC error
+    /// object with no `result` field — is detected and surfaces the message text,
+    /// not misread as a parse error.
+    #[test]
+    fn parse_canopy_rpc_response_top_level_error_envelope_is_canopy_error() {
+        let raw = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"task detail: not found"}}"#;
+        let result = parse_canopy_rpc_response(raw);
+        match result {
+            Err(DispatchError::CanopyError(msg)) => {
+                assert!(
+                    msg.contains("not found"),
+                    "expected error message to contain 'not found', got: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected Err(CanopyError), got Ok"),
+            Err(other) => panic!("expected CanopyError, got: {other:?}"),
+        }
+    }
+
+    /// Prove that a well-formed success envelope deserializes correctly end-to-end.
+    #[test]
+    fn parse_canopy_rpc_response_success_envelope_deserializes_task() {
+        let raw = r#"{"jsonrpc":"2.0","id":1,"result":{"task":{"task_id":"01TEST","title":"socket test","status":"open"},"completion_signal":null}}"#;
+        let result = parse_canopy_rpc_response(raw);
+        match result {
+            Ok(wire) => {
+                assert_eq!(wire.task.task_id, "01TEST");
+                assert_eq!(wire.task.status, "open");
+            }
+            Err(e) => panic!("expected Ok, got: {e:?}"),
+        }
+    }
+
+    /// Prove that the defensive nested result.error path still works even though
+    /// canopy does not emit this shape on the socket transport.
+    #[test]
+    fn parse_canopy_rpc_response_nested_result_error_is_canopy_error() {
+        let raw = r#"{"jsonrpc":"2.0","id":1,"result":{"error":"legacy app error"}}"#;
+        let result = parse_canopy_rpc_response(raw);
+        match result {
+            Err(DispatchError::CanopyError(msg)) => {
+                assert!(
+                    msg.contains("legacy app error"),
+                    "expected message to contain error string, got: {msg}"
+                );
+            }
+            Ok(_) => panic!("expected Err(CanopyError), got Ok"),
+            Err(other) => panic!("expected CanopyError, got: {other:?}"),
+        }
     }
 
     #[test]
