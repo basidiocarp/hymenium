@@ -60,6 +60,13 @@ pub struct TaskPacket {
     pub context_budget: Option<ContextBudget>,
     /// Conditions under which the Worker must escalate rather than retry.
     pub escalation_conditions: Vec<String>,
+    /// Optional per-phase structured-output declaration the Worker's output should conform to.
+    /// Populated from Phase config at dispatch. Omitted from JSON when None.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<serde_json::Value>,
+    /// Opaque carry-through flag for the Worker runtime (origin: letta). Hymenium does not
+    /// interpret it. Defaults to false.
+    pub request_heartbeat: bool,
 }
 
 impl TaskPacket {
@@ -88,6 +95,8 @@ impl TaskPacket {
                 "Required dependency task is not yet complete".to_string(),
                 "Three consecutive test failures after repair attempts".to_string(),
             ],
+            response_format: None,
+            request_heartbeat: false,
         }
     }
 }
@@ -158,5 +167,56 @@ mod tests {
             },
         );
         assert_eq!(p.schema_version, "1.0");
+    }
+
+    #[test]
+    fn task_packet_response_format_and_heartbeat_serialization() {
+        // Test 1: packet with None response_format and false request_heartbeat
+        // should omit response_format from JSON and include request_heartbeat: false
+        let packet_no_format = TaskPacket::new(
+            "01JNQWF0000000000000000001",
+            "implement",
+            "test goal",
+            vec![],
+            vec![],
+            CapabilityRequirements {
+                tier: "sonnet".to_string(),
+                tools: vec![],
+            },
+        );
+
+        let json = serde_json::to_string(&packet_no_format).expect("serialize");
+        assert!(
+            !json.contains("\"response_format\""),
+            "response_format: None should be skipped in JSON"
+        );
+        assert!(
+            json.contains("\"request_heartbeat\":false"),
+            "request_heartbeat: false should be present in JSON"
+        );
+
+        // Test 2: packet with response_format = Some(json object) should serialize it through
+        let mut packet_with_format = packet_no_format.clone();
+        packet_with_format.response_format = Some(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "result": { "type": "string" }
+            }
+        }));
+        packet_with_format.request_heartbeat = true;
+
+        let json = serde_json::to_string(&packet_with_format).expect("serialize");
+        assert!(
+            json.contains("\"response_format\""),
+            "response_format: Some(...) should appear in JSON"
+        );
+        assert!(
+            json.contains("\"request_heartbeat\":true"),
+            "request_heartbeat: true should be present in JSON"
+        );
+        assert!(
+            json.contains("\"type\":\"object\""),
+            "nested JSON schema should be serialized through"
+        );
     }
 }

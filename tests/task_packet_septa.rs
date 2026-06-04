@@ -1,5 +1,8 @@
 use hymenium::dispatch::{CapabilityRequirements, TaskPacket};
 
+// Mirrors the schema's `required` array exactly. Optional fields
+// (context_budget, response_format, request_heartbeat) are intentionally
+// absent — they are validated by `task_packet_no_extra_fields_beyond_septa_contract`.
 const SEPTA_REQUIRED_FIELDS: &[&str] = &[
     "schema_version",
     "task_id",
@@ -107,6 +110,8 @@ fn task_packet_no_extra_fields_beyond_septa_contract() {
         "capability_requirements",
         "context_budget",
         "escalation_conditions",
+        "response_format",
+        "request_heartbeat",
     ]
     .into_iter()
     .collect();

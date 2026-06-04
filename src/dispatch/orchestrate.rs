@@ -134,7 +134,7 @@ pub fn dispatch_workflow(
             "Execute the '{}' phase ({}) for handoff: {}",
             phase.phase_id, phase.role, handoff.title
         );
-        let packet = TaskPacket::new(
+        let mut packet = TaskPacket::new(
             workflow_id.0.clone(),
             phase.phase_id.clone(),
             goal,
@@ -142,6 +142,10 @@ pub fn dispatch_workflow(
             acceptance_criteria.clone(),
             required_capabilities,
         );
+
+        // Wire phase config into the packet before serialization.
+        packet.response_format.clone_from(&phase.response_format);
+        packet.request_heartbeat = phase.request_heartbeat;
 
         // Serialize packet as structured JSON embedded in the description.
         let packet_json = serde_json::to_string(&packet).expect(

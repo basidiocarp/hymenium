@@ -171,6 +171,12 @@ pub struct Phase {
     /// Required artifacts block dispatch; optional ones emit warnings only.
     #[serde(default)]
     pub required_artifacts: Vec<ArtifactRequirement>,
+    /// Optional per-phase structured-output declaration, carried into the TaskPacket at dispatch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<serde_json::Value>,
+    /// Opaque carry-through flag for the Worker runtime; carried into the TaskPacket at dispatch.
+    #[serde(default)]
+    pub request_heartbeat: bool,
 }
 
 impl Phase {
@@ -400,6 +406,8 @@ pub fn impl_audit_default() -> WorkflowTemplate {
                 max_tool_failure_per_phase: None,
                 max_requests_per_phase: None,
                 required_artifacts: vec![],
+                response_format: None,
+                request_heartbeat: false,
             },
             Phase {
                 phase_id: "audit".to_string(),
@@ -419,6 +427,8 @@ pub fn impl_audit_default() -> WorkflowTemplate {
                 max_tool_failure_per_phase: None,
                 max_requests_per_phase: None,
                 required_artifacts: vec![],
+                response_format: None,
+                request_heartbeat: false,
             },
         ],
         transitions: vec![Transition {
@@ -615,6 +625,8 @@ mod tests {
                 description: "test artifact".to_string(),
                 required: true,
             }],
+            response_format: None,
+            request_heartbeat: false,
         };
 
         let result = check_artifact_prerequisites(&phase, Some(tempdir.path()));
@@ -639,6 +651,8 @@ mod tests {
                 description: "missing artifact".to_string(),
                 required: true,
             }],
+            response_format: None,
+            request_heartbeat: false,
         };
 
         let result = check_artifact_prerequisites(&phase, None);
@@ -665,6 +679,8 @@ mod tests {
                 description: "optional artifact".to_string(),
                 required: false,
             }],
+            response_format: None,
+            request_heartbeat: false,
         };
 
         let result = check_artifact_prerequisites(&phase, None);
@@ -687,6 +703,8 @@ mod tests {
             max_tool_failure_per_phase: None,
             max_requests_per_phase: None,
             required_artifacts: vec![],
+            response_format: None,
+            request_heartbeat: false,
         };
 
         let result = check_artifact_prerequisites(&phase, None);
@@ -782,6 +800,8 @@ mod tests {
             max_tool_failure_per_phase: None,
             max_requests_per_phase: None,
             required_artifacts: vec![],
+            response_format: None,
+            request_heartbeat: false,
         };
         assert_eq!(
             phase_no_agent_role.effective_agent_role(),
@@ -799,6 +819,8 @@ mod tests {
             max_tool_failure_per_phase: None,
             max_requests_per_phase: None,
             required_artifacts: vec![],
+            response_format: None,
+            request_heartbeat: false,
         };
         assert_eq!(
             phase_auditor.effective_agent_role(),
@@ -816,6 +838,8 @@ mod tests {
             max_tool_failure_per_phase: None,
             max_requests_per_phase: None,
             required_artifacts: vec![],
+            response_format: None,
+            request_heartbeat: false,
         };
         assert_eq!(
             phase_reviewer.effective_agent_role(),
@@ -833,6 +857,8 @@ mod tests {
             max_tool_failure_per_phase: None,
             max_requests_per_phase: None,
             required_artifacts: vec![],
+            response_format: None,
+            request_heartbeat: false,
         };
         assert_eq!(
             phase_operator.effective_agent_role(),
