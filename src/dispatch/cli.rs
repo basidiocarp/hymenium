@@ -209,8 +209,7 @@ fn socket_get_task(
 /// 1. Top-level `error` present → surface `error.message` as `DispatchError::CanopyError`.
 ///    This is the primary path for task-not-found and other handler errors.
 /// 2. Top-level `result` present:
-///    a. Check for a nested `result.error` string as a secondary/defensive path
-///       (canopy does not use this shape, but the check is harmless).
+///    a. Check for a nested `result.error` string as a defensive path (canopy does not emit this shape, but the check is harmless).
 ///    b. Deserialize `result` as `TaskDetailWireMirror`.
 /// 3. Neither field present → parse error.
 fn parse_canopy_rpc_response(line: &str) -> Result<TaskDetailWireMirror, DispatchError> {
@@ -222,8 +221,7 @@ fn parse_canopy_rpc_response(line: &str) -> Result<TaskDetailWireMirror, Dispatc
         let message = err_obj
             .get("message")
             .and_then(serde_json::Value::as_str)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| err_obj.to_string());
+            .map_or_else(|| err_obj.to_string(), ToString::to_string);
         return Err(DispatchError::CanopyError(format!("canopy: {message}")));
     }
 

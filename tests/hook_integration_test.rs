@@ -17,7 +17,9 @@ mod hook_integration_tests {
 
     #[test]
     fn test_hook_blocks_with_active_lock() {
-        let _m = HOOK_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _m = HOOK_TEST_MUTEX
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let lock_path = std::env::temp_dir().join("hymenium-workflow-test-workflow.lock");
         let _cleanup = LockGuard {
             path: lock_path.clone(),
@@ -53,7 +55,9 @@ mod hook_integration_tests {
 
     #[test]
     fn test_hook_allows_without_lock() {
-        let _m = HOOK_TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _m = HOOK_TEST_MUTEX
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Remove any stale per-workflow lock files (new naming scheme: hymenium-workflow-*.lock).
         let tmp = std::env::temp_dir();
         if let Ok(entries) = fs::read_dir(&tmp) {

@@ -174,11 +174,9 @@ pub fn find_any_active_lock() -> Option<WorkflowLock> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::sync::{LazyLock, Mutex};
 
-    lazy_static::lazy_static! {
-        static ref LOCK_TEST_MUTEX: Mutex<()> = Mutex::new(());
-    }
+    static LOCK_TEST_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn acquire_and_release_lock_roundtrip() {
@@ -219,7 +217,7 @@ mod tests {
         // Manually write a lock with an impossible PID
         let path = lock_path("stale-workflow");
         let lock = WorkflowLock {
-            pid: 2147483647, // Very large PID that's unlikely to exist
+            pid: 2_147_483_647, // Very large PID that's unlikely to exist
             workflow_id: "stale-workflow".to_string(),
             phase: "stale-phase".to_string(),
             started_at: chrono::Utc::now().to_rfc3339(),
