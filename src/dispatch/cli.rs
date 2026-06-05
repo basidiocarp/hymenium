@@ -2,6 +2,7 @@ use super::{
     CanopyClient, CompletenessReport, DispatchError, ImportResult, TaskDetail, TaskOptions,
 };
 use crate::workflow::template::AgentRole;
+#[cfg(unix)]
 use std::io::{BufRead as _, Write as _};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -73,6 +74,7 @@ fn map_wire_to_detail(wire: TaskDetailWireMirror) -> TaskDetail {
 /// The two fields are mutually exclusive in practice, but both are `Option` so
 /// that a partial or unexpected envelope does not cause a hard deserialize
 /// failure — the parser below handles the missing-field cases explicitly.
+#[cfg(unix)]
 #[derive(serde::Deserialize)]
 struct CanopyRpcResult {
     result: Option<serde_json::Value>,
@@ -93,6 +95,7 @@ struct CanopyRpcResult {
 /// Returns `None` on any resolution failure (missing env, unreadable descriptor,
 /// or platform path unavailable). The caller falls back to the CLI path when
 /// `None` is returned.
+#[cfg(unix)]
 fn resolve_canopy_socket() -> Option<PathBuf> {
     // 1. Explicit env override.
     if let Ok(p) = std::env::var("HYMENIUM_CANOPY_SOCKET") {
@@ -212,6 +215,7 @@ fn socket_get_task(
 ///    a. Check for a nested `result.error` string as a defensive path (canopy does not emit this shape, but the check is harmless).
 ///    b. Deserialize `result` as `TaskDetailWireMirror`.
 /// 3. Neither field present → parse error.
+#[cfg(unix)]
 fn parse_canopy_rpc_response(line: &str) -> Result<TaskDetailWireMirror, DispatchError> {
     let rpc: CanopyRpcResult = serde_json::from_str(line.trim())
         .map_err(|e| DispatchError::CanopyError(format!("canopy socket response parse: {e}")))?;
@@ -1063,6 +1067,7 @@ mod tests {
     /// Prove that the real canopy not-found envelope — a top-level JSON-RPC error
     /// object with no `result` field — is detected and surfaces the message text,
     /// not misread as a parse error.
+    #[cfg(unix)]
     #[test]
     fn parse_canopy_rpc_response_top_level_error_envelope_is_canopy_error() {
         let raw = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"task detail: not found"}}"#;
@@ -1080,6 +1085,7 @@ mod tests {
     }
 
     /// Prove that a well-formed success envelope deserializes correctly end-to-end.
+    #[cfg(unix)]
     #[test]
     fn parse_canopy_rpc_response_success_envelope_deserializes_task() {
         let raw = r#"{"jsonrpc":"2.0","id":1,"result":{"task":{"task_id":"01TEST","title":"socket test","status":"open"},"completion_signal":null}}"#;
@@ -1095,6 +1101,7 @@ mod tests {
 
     /// Prove that the defensive nested result.error path still works even though
     /// canopy does not emit this shape on the socket transport.
+    #[cfg(unix)]
     #[test]
     fn parse_canopy_rpc_response_nested_result_error_is_canopy_error() {
         let raw = r#"{"jsonrpc":"2.0","id":1,"result":{"error":"legacy app error"}}"#;

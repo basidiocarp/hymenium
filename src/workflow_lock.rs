@@ -40,6 +40,7 @@ fn is_pid_alive(pid: u32) -> bool {
     {
         // On non-Unix systems, assume the PID is stale; fail-open by returning false.
         // This means the lock will not block compaction on Windows.
+        let _ = pid;
         false
     }
 }
