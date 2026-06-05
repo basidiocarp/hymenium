@@ -139,7 +139,10 @@ fn resolve_canopy_socket() -> Option<PathBuf> {
 /// Returns `Err(DispatchError::CanopyError)` on any I/O, framing, or
 /// application-level error so the caller can fall back to the CLI path.
 #[cfg(unix)]
-fn socket_get_task(socket_path: &std::path::Path, task_id: &str) -> Result<TaskDetailWireMirror, DispatchError> {
+fn socket_get_task(
+    socket_path: &std::path::Path,
+    task_id: &str,
+) -> Result<TaskDetailWireMirror, DispatchError> {
     use std::os::unix::net::UnixStream;
 
     let mut stream = UnixStream::connect(socket_path).map_err(|e| {
@@ -153,12 +156,12 @@ fn socket_get_task(socket_path: &std::path::Path, task_id: &str) -> Result<TaskD
     // socket path cannot block longer than the CLI path would in either
     // direction.
     let timeout = canopy_timeout();
-    stream.set_read_timeout(Some(timeout)).map_err(|e| {
-        DispatchError::CanopyError(format!("canopy socket set_read_timeout: {e}"))
-    })?;
-    stream.set_write_timeout(Some(timeout)).map_err(|e| {
-        DispatchError::CanopyError(format!("canopy socket set_write_timeout: {e}"))
-    })?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| DispatchError::CanopyError(format!("canopy socket set_read_timeout: {e}")))?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| DispatchError::CanopyError(format!("canopy socket set_write_timeout: {e}")))?;
 
     // Build the request via serde_json so task_id values containing `"`, `\`,
     // or newlines cannot produce malformed JSON or inject a second framing line.
@@ -168,21 +171,21 @@ fn socket_get_task(socket_path: &std::path::Path, task_id: &str) -> Result<TaskD
         "method": "canopy_task",
         "params": { "task_id": task_id }
     });
-    let request = serde_json::to_string(&request_value).map_err(|e| {
-        DispatchError::CanopyError(format!("canopy socket request serialize: {e}"))
-    })? + "\n";
-    stream.write_all(request.as_bytes()).map_err(|e| {
-        DispatchError::CanopyError(format!("canopy socket write: {e}"))
-    })?;
-    stream.flush().map_err(|e| {
-        DispatchError::CanopyError(format!("canopy socket flush: {e}"))
-    })?;
+    let request = serde_json::to_string(&request_value)
+        .map_err(|e| DispatchError::CanopyError(format!("canopy socket request serialize: {e}")))?
+        + "\n";
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| DispatchError::CanopyError(format!("canopy socket write: {e}")))?;
+    stream
+        .flush()
+        .map_err(|e| DispatchError::CanopyError(format!("canopy socket flush: {e}")))?;
 
     let mut response_line = String::new();
     let mut reader = std::io::BufReader::new(&stream);
-    reader.read_line(&mut response_line).map_err(|e| {
-        DispatchError::CanopyError(format!("canopy socket read: {e}"))
-    })?;
+    reader
+        .read_line(&mut response_line)
+        .map_err(|e| DispatchError::CanopyError(format!("canopy socket read: {e}")))?;
 
     parse_canopy_rpc_response(&response_line)
 }
@@ -211,9 +214,8 @@ fn socket_get_task(socket_path: &std::path::Path, task_id: &str) -> Result<TaskD
 ///    b. Deserialize `result` as `TaskDetailWireMirror`.
 /// 3. Neither field present → parse error.
 fn parse_canopy_rpc_response(line: &str) -> Result<TaskDetailWireMirror, DispatchError> {
-    let rpc: CanopyRpcResult = serde_json::from_str(line.trim()).map_err(|e| {
-        DispatchError::CanopyError(format!("canopy socket response parse: {e}"))
-    })?;
+    let rpc: CanopyRpcResult = serde_json::from_str(line.trim())
+        .map_err(|e| DispatchError::CanopyError(format!("canopy socket response parse: {e}")))?;
 
     // Primary path: top-level JSON-RPC error envelope (real canopy not-found shape).
     if let Some(err_obj) = &rpc.error {
@@ -238,9 +240,8 @@ fn parse_canopy_rpc_response(line: &str) -> Result<TaskDetailWireMirror, Dispatc
         return Err(DispatchError::CanopyError(format!("canopy: {err_str}")));
     }
 
-    serde_json::from_value::<TaskDetailWireMirror>(result).map_err(|e| {
-        DispatchError::CanopyError(format!("canopy task detail deserialize: {e}"))
-    })
+    serde_json::from_value::<TaskDetailWireMirror>(result)
+        .map_err(|e| DispatchError::CanopyError(format!("canopy task detail deserialize: {e}")))
 }
 
 /// Parse a `TaskDetailWireMirror` from a JSON string (used for the CLI-fallback
@@ -251,17 +252,15 @@ fn parse_canopy_rpc_response(line: &str) -> Result<TaskDetailWireMirror, Dispatc
 fn parse_task_detail_from_json(json: &str) -> Result<TaskDetailWireMirror, DispatchError> {
     // Check for an inline error field at the top level (mirrors the socket
     // error-in-result encoding for CLI consumers).
-    let value: serde_json::Value = serde_json::from_str(json.trim()).map_err(|e| {
-        DispatchError::CanopyError(format!("failed to parse task detail: {e}"))
-    })?;
+    let value: serde_json::Value = serde_json::from_str(json.trim())
+        .map_err(|e| DispatchError::CanopyError(format!("failed to parse task detail: {e}")))?;
 
     if let Some(err_str) = value.get("error").and_then(serde_json::Value::as_str) {
         return Err(DispatchError::CanopyError(format!("canopy: {err_str}")));
     }
 
-    serde_json::from_value::<TaskDetailWireMirror>(value).map_err(|e| {
-        DispatchError::CanopyError(format!("failed to parse task detail: {e}"))
-    })
+    serde_json::from_value::<TaskDetailWireMirror>(value)
+        .map_err(|e| DispatchError::CanopyError(format!("failed to parse task detail: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -1011,7 +1010,10 @@ mod tests {
             "task_id must match fixture"
         );
         assert_eq!(detail.status, "open", "status must match fixture");
-        assert!(!detail.has_code_diff, "has_code_diff must be false per fixture");
+        assert!(
+            !detail.has_code_diff,
+            "has_code_diff must be false per fixture"
+        );
         assert!(
             !detail.has_verification_passed,
             "has_verification_passed must be false per fixture"
