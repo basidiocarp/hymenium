@@ -192,14 +192,26 @@ mod tests {
         // Acquire a lock
         acquire_lock("test-workflow", "test-phase").expect("failed to acquire lock");
 
-        // Should be active now
-        assert!(is_active_lock("test-workflow"));
+        #[cfg(unix)]
+        {
+            // Unix: is_pid_alive(current_pid) is true, so the freshly-acquired
+            // lock reads as active and its content is readable.
+            assert!(is_active_lock("test-workflow"));
 
-        // Lock content should be readable
-        let lock = read_active_lock("test-workflow").expect("failed to read lock");
-        assert_eq!(lock.workflow_id, "test-workflow");
-        assert_eq!(lock.phase, "test-phase");
-        assert_eq!(lock.pid, process::id());
+            let lock = read_active_lock("test-workflow").expect("failed to read lock");
+            assert_eq!(lock.workflow_id, "test-workflow");
+            assert_eq!(lock.phase, "test-phase");
+            assert_eq!(lock.pid, process::id());
+        }
+
+        #[cfg(not(unix))]
+        {
+            // Non-unix: is_pid_alive always returns false (fail-open), so even a
+            // freshly-acquired lock reads as inactive — the lock never blocks
+            // compaction on Windows. This pins that documented behavior; see the
+            // cfg(not(unix)) branch of is_pid_alive.
+            assert!(!is_active_lock("test-workflow"));
+        }
 
         // Release the lock
         release_lock("test-workflow").expect("failed to release lock");
