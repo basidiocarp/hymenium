@@ -54,7 +54,7 @@ fn is_pid_alive(pid: u32) -> bool {
             }
 
             let mut exit_code: u32 = 0;
-            let success = GetExitCodeProcess(handle, &mut exit_code) != 0;
+            let success = GetExitCodeProcess(handle, &raw mut exit_code) != 0;
             let _ = CloseHandle(handle);
 
             success && exit_code == STILL_ACTIVE
