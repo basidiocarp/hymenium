@@ -28,18 +28,42 @@ fn lock_path(workflow_id: &str) -> PathBuf {
 /// Check if a process ID is still alive.
 ///
 /// On Unix-like systems, uses `libc::kill(pid, 0)` to test if the process exists.
+/// On Windows, uses `OpenProcess` and `GetExitCodeProcess` to check if the process is running.
 /// Returns true if the process is alive, false if the PID is stale.
-#[allow(unsafe_code, clippy::cast_possible_wrap)] // libc::kill requires unsafe; cast is safe for valid PIDs
+#[allow(unsafe_code, clippy::cast_possible_wrap)] // platform-specific FFI requires unsafe; casts are safe for valid PIDs
 fn is_pid_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
         unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        // On non-Unix systems, assume the PID is stale; fail-open by returning false.
-        // This means the lock will not block compaction on Windows.
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+
+        const STILL_ACTIVE: u32 = 259;
+        const FALSE: i32 = 0;
+
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+            if handle.is_null() {
+                return false;
+            }
+
+            let mut exit_code: u32 = 0;
+            let success = GetExitCodeProcess(handle, &mut exit_code) != 0;
+            let _ = CloseHandle(handle);
+
+            success && exit_code == STILL_ACTIVE
+        }
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        // On other targets, assume the PID is stale; fail-open by returning false.
         let _ = pid;
         false
     }
@@ -192,10 +216,10 @@ mod tests {
         // Acquire a lock
         acquire_lock("test-workflow", "test-phase").expect("failed to acquire lock");
 
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            // Unix: is_pid_alive(current_pid) is true, so the freshly-acquired
-            // lock reads as active and its content is readable.
+            // Unix and Windows: is_pid_alive(current_pid) is true, so the
+            // freshly-acquired lock reads as active and its content is readable.
             assert!(is_active_lock("test-workflow"));
 
             let lock = read_active_lock("test-workflow").expect("failed to read lock");
@@ -204,12 +228,11 @@ mod tests {
             assert_eq!(lock.pid, process::id());
         }
 
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
-            // Non-unix: is_pid_alive always returns false (fail-open), so even a
-            // freshly-acquired lock reads as inactive — the lock never blocks
-            // compaction on Windows. This pins that documented behavior; see the
-            // cfg(not(unix)) branch of is_pid_alive.
+            // On other targets, is_pid_alive always returns false (fail-open), so
+            // even a freshly-acquired lock reads as inactive. This is the generic
+            // fallback behavior.
             assert!(!is_active_lock("test-workflow"));
         }
 

@@ -48,19 +48,18 @@ mod hook_integration_tests {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         assert!(
             stdout.contains("block"),
             "Hook should block when a workflow is active, got: '{stdout}'"
         );
 
-        // On non-unix, is_pid_alive always returns false (fail-open), so the
-        // lock is never treated as active and the hook allows compaction. Pin
-        // that documented behavior at the integration level too.
-        #[cfg(not(unix))]
+        // On other targets, is_pid_alive always returns false (fail-open), so the
+        // lock is never treated as active and the hook allows compaction.
+        #[cfg(not(any(unix, windows)))]
         assert!(
             stdout.contains("allow"),
-            "On non-unix the lock never blocks (fail-open); hook should allow, got: '{stdout}'"
+            "On non-unix/windows the lock never blocks (fail-open); hook should allow, got: '{stdout}'"
         );
     }
 
