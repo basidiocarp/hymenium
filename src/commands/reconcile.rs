@@ -96,6 +96,22 @@ fn print_summary(
             PhaseReconcileOutcome::AlreadyTerminal { phase_id } => {
                 println!("  phase {phase_id}: already in terminal state (idempotent)");
             }
+            PhaseReconcileOutcome::StoppedByAgentSignal {
+                phase_id,
+                next_action,
+            } => {
+                println!(
+                    "  phase {phase_id}: agent requested stop (should_continue absent or false)"
+                );
+                if let Some(action) = next_action {
+                    if let Some(follow_up) = &action.follow_up_task_id {
+                        println!("    next_action: follow_up_task_id={follow_up}");
+                    }
+                    if let Some(directive) = &action.directive {
+                        println!("    next_action: directive={directive}");
+                    }
+                }
+            }
         }
     }
     println!("  workflow status: {final_status}");
@@ -221,6 +237,7 @@ mod tests {
                     required_capabilities: vec![],
                     has_code_diff: true,
                     has_verification_passed: true,
+                    completion_signal: None,
                 })
             }
             fn check_completeness(&self, _path: &str) -> Result<CompletenessReport, DispatchError> {
@@ -308,6 +325,7 @@ mod tests {
                     required_capabilities: vec![],
                     has_code_diff: false,
                     has_verification_passed: false,
+                    completion_signal: None,
                 })
             }
             fn check_completeness(&self, _: &str) -> Result<CompletenessReport, DispatchError> {

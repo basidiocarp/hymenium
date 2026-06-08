@@ -98,6 +98,7 @@ impl CanopyClient for MockCanopyClient {
             required_capabilities: options.required_capabilities.clone(),
             has_code_diff: false,
             has_verification_passed: false,
+            completion_signal: None,
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
         self.descriptions
@@ -128,6 +129,7 @@ impl CanopyClient for MockCanopyClient {
             required_capabilities: options.required_capabilities.clone(),
             has_code_diff: false,
             has_verification_passed: false,
+            completion_signal: None,
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
         self.descriptions
@@ -187,6 +189,7 @@ impl CanopyClient for MockCanopyClient {
             required_capabilities: Vec::new(),
             has_code_diff: false,
             has_verification_passed: false,
+            completion_signal: None,
         };
         self.tasks.borrow_mut().insert(task_id.clone(), detail);
         self.descriptions

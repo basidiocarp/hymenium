@@ -85,6 +85,7 @@ impl CanopyClient for StatusMock {
             required_capabilities: vec![],
             has_code_diff: self.has_evidence,
             has_verification_passed: self.has_evidence,
+            completion_signal: None,
         })
     }
 
@@ -534,6 +535,490 @@ fn evidence_gate_allows_advance_when_code_diff_and_verification_present() {
             PhaseReconcileOutcome::MarkedCompleted { advanced: true, .. }
         ),
         "expected MarkedCompleted with advanced=true, got: {:?}",
+        result.outcomes[0]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: completion signal with should_continue=false stops workflow
+// ---------------------------------------------------------------------------
+
+#[test]
+fn phase_reconciliation_stops_when_completion_signal_should_continue_false() {
+    use hymenium::dispatch::CompletionSignal;
+
+    let instance = dispatched_instance("wf-signal-stop");
+
+    struct StopSignalMock;
+
+    impl CanopyClient for StopSignalMock {
+        fn create_task(
+            &self,
+            _title: &str,
+            _desc: &str,
+            _root: &str,
+            _opts: &TaskOptions,
+        ) -> Result<String, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn create_subtask(
+            &self,
+            _parent: &str,
+            _title: &str,
+            _desc: &str,
+            _opts: &TaskOptions,
+        ) -> Result<String, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn assign_task(
+            &self,
+            _task_id: &str,
+            _agent: &str,
+            _by: &str,
+        ) -> Result<(), DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
+            Ok(TaskDetail {
+                task_id: task_id.to_string(),
+                title: "test".to_string(),
+                status: "completed".to_string(),
+                agent_id: None,
+                parent_id: None,
+                required_capabilities: vec![],
+                has_code_diff: true,
+                has_verification_passed: true,
+                completion_signal: Some(CompletionSignal {
+                    status: None,
+                    should_continue: Some(false),
+                    next_action: None,
+                    summary: None,
+                    agent_id: None,
+                }),
+            })
+        }
+
+        fn check_completeness(&self, _path: &str) -> Result<CompletenessReport, DispatchError> {
+            Ok(CompletenessReport {
+                complete: true,
+                total_items: 0,
+                completed_items: 0,
+                missing: vec![],
+            })
+        }
+
+        fn import_handoff(
+            &self,
+            _path: &str,
+            _assign_to: Option<&str>,
+        ) -> Result<ImportResult, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn cancel_task(&self, _task_id: &str) -> Result<(), DispatchError> {
+            Ok(())
+        }
+    }
+
+    let result =
+        reconcile_phases(instance, &StopSignalMock, true).expect("reconcile should succeed");
+
+    // Implement phase must be Completed.
+    assert_eq!(
+        result.instance.phase_states[0].status,
+        PhaseStatus::Completed,
+        "implement phase must be Completed"
+    );
+
+    // Workflow should NOT advance — stopped by signal.
+    assert_eq!(
+        result.instance.current_phase_idx, 0,
+        "workflow must not advance when agent signal requests stop"
+    );
+
+    // Workflow status must be Completed (clean stop, not still Dispatched).
+    assert_eq!(
+        result.instance.status,
+        WorkflowStatus::Completed,
+        "workflow status must be Completed after agent stop signal"
+    );
+
+    // Outcome must be StoppedByAgentSignal.
+    assert!(
+        matches!(
+            &result.outcomes[0],
+            PhaseReconcileOutcome::StoppedByAgentSignal { phase_id, .. }
+            if phase_id == &result.instance.phase_states[0].phase_id
+        ),
+        "expected StoppedByAgentSignal, got: {:?}",
+        result.outcomes[0]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: next_action on a stop signal is surfaced (not dropped) on the outcome.
+// Surface-only — the lane must NOT dispatch a follow-up task from it.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn phase_reconciliation_surfaces_next_action_on_stop_outcome() {
+    use hymenium::dispatch::{CompletionSignal, NextAction};
+
+    let instance = dispatched_instance("wf-signal-next-action");
+
+    struct StopWithNextActionMock;
+
+    impl CanopyClient for StopWithNextActionMock {
+        fn create_task(
+            &self,
+            _title: &str,
+            _desc: &str,
+            _root: &str,
+            _opts: &TaskOptions,
+        ) -> Result<String, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn create_subtask(
+            &self,
+            _parent: &str,
+            _title: &str,
+            _desc: &str,
+            _opts: &TaskOptions,
+        ) -> Result<String, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn assign_task(
+            &self,
+            _task_id: &str,
+            _agent: &str,
+            _by: &str,
+        ) -> Result<(), DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
+            Ok(TaskDetail {
+                task_id: task_id.to_string(),
+                title: "test".to_string(),
+                status: "completed".to_string(),
+                agent_id: None,
+                parent_id: None,
+                required_capabilities: vec![],
+                has_code_diff: true,
+                has_verification_passed: true,
+                completion_signal: Some(CompletionSignal {
+                    status: None,
+                    should_continue: Some(false),
+                    next_action: Some(NextAction {
+                        follow_up_task_id: Some("01FOLLOWUP".to_string()),
+                        directive: Some("escalate to human".to_string()),
+                    }),
+                    summary: None,
+                    agent_id: None,
+                }),
+            })
+        }
+
+        fn check_completeness(&self, _path: &str) -> Result<CompletenessReport, DispatchError> {
+            Ok(CompletenessReport {
+                complete: true,
+                total_items: 0,
+                completed_items: 0,
+                missing: vec![],
+            })
+        }
+
+        fn import_handoff(
+            &self,
+            _path: &str,
+            _assign_to: Option<&str>,
+        ) -> Result<ImportResult, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn cancel_task(&self, _task_id: &str) -> Result<(), DispatchError> {
+            Ok(())
+        }
+    }
+
+    let result = reconcile_phases(instance, &StopWithNextActionMock, true)
+        .expect("reconcile should succeed");
+
+    // The stop outcome must carry the next_action verbatim, not drop it.
+    let next_action = match &result.outcomes[0] {
+        PhaseReconcileOutcome::StoppedByAgentSignal { next_action, .. } => next_action
+            .as_ref()
+            .expect("next_action must be surfaced on the stop outcome"),
+        other => panic!("expected StoppedByAgentSignal, got: {other:?}"),
+    };
+    assert_eq!(
+        next_action.follow_up_task_id.as_deref(),
+        Some("01FOLLOWUP"),
+        "follow_up_task_id must be surfaced verbatim"
+    );
+    assert_eq!(
+        next_action.directive.as_deref(),
+        Some("escalate to human"),
+        "directive must be surfaced verbatim"
+    );
+
+    // Surface-only invariant: stopping still does not advance the workflow.
+    assert_eq!(
+        result.instance.current_phase_idx, 0,
+        "surfacing next_action must not advance the workflow"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: completion signal with should_continue=true allows normal advance
+// ---------------------------------------------------------------------------
+
+#[test]
+fn phase_reconciliation_advances_when_completion_signal_should_continue_true() {
+    use hymenium::dispatch::CompletionSignal;
+
+    let instance = dispatched_instance("wf-signal-continue");
+
+    struct ContinueSignalMock;
+
+    impl CanopyClient for ContinueSignalMock {
+        fn create_task(
+            &self,
+            _title: &str,
+            _desc: &str,
+            _root: &str,
+            _opts: &TaskOptions,
+        ) -> Result<String, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn create_subtask(
+            &self,
+            _parent: &str,
+            _title: &str,
+            _desc: &str,
+            _opts: &TaskOptions,
+        ) -> Result<String, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn assign_task(
+            &self,
+            _task_id: &str,
+            _agent: &str,
+            _by: &str,
+        ) -> Result<(), DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
+            Ok(TaskDetail {
+                task_id: task_id.to_string(),
+                title: "test".to_string(),
+                status: if task_id == "task-implement" {
+                    "completed".to_string()
+                } else {
+                    "active".to_string()
+                },
+                agent_id: None,
+                parent_id: None,
+                required_capabilities: vec![],
+                has_code_diff: true,
+                has_verification_passed: true,
+                completion_signal: if task_id == "task-implement" {
+                    Some(CompletionSignal {
+                        status: None,
+                        should_continue: Some(true),
+                        next_action: None,
+                        summary: None,
+                        agent_id: None,
+                    })
+                } else {
+                    None
+                },
+            })
+        }
+
+        fn check_completeness(&self, _path: &str) -> Result<CompletenessReport, DispatchError> {
+            Ok(CompletenessReport {
+                complete: true,
+                total_items: 0,
+                completed_items: 0,
+                missing: vec![],
+            })
+        }
+
+        fn import_handoff(
+            &self,
+            _path: &str,
+            _assign_to: Option<&str>,
+        ) -> Result<ImportResult, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn cancel_task(&self, _task_id: &str) -> Result<(), DispatchError> {
+            Ok(())
+        }
+    }
+
+    let result =
+        reconcile_phases(instance, &ContinueSignalMock, true).expect("reconcile should succeed");
+
+    // Implement phase must be Completed.
+    assert_eq!(
+        result.instance.phase_states[0].status,
+        PhaseStatus::Completed,
+        "implement phase must be Completed"
+    );
+
+    // Workflow should advance to audit phase (signal allows it).
+    assert_eq!(
+        result.instance.current_phase_idx, 1,
+        "workflow must advance when agent signal allows continue"
+    );
+
+    // Workflow status should be Dispatched (now at audit phase waiting for dispatch).
+    assert_eq!(
+        result.instance.status,
+        WorkflowStatus::Dispatched,
+        "workflow status must be Dispatched after advancing to audit phase"
+    );
+
+    // Outcome should be MarkedCompleted with advanced=true (not StoppedByAgentSignal).
+    assert!(
+        matches!(
+            result.outcomes[0],
+            PhaseReconcileOutcome::MarkedCompleted { advanced: true, .. }
+        ),
+        "expected MarkedCompleted with advanced=true, got: {:?}",
+        result.outcomes[0]
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test: a should_continue=true signal cannot force advance past a FAILING
+// evidence gate. Invariant: the completion signal may only SUPPRESS advance;
+// it never bypasses, weakens, or forces past EvidenceGateEvaluator.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn completion_signal_continue_does_not_bypass_failing_evidence_gate() {
+    use hymenium::dispatch::CompletionSignal;
+
+    let instance = dispatched_instance("wf-signal-no-bypass");
+
+    // Mock: task completed, signal says should_continue=true, but evidence is
+    // ABSENT (has_code_diff=false, has_verification_passed=false).
+    struct ContinueButNoEvidenceMock;
+
+    impl CanopyClient for ContinueButNoEvidenceMock {
+        fn create_task(
+            &self,
+            _title: &str,
+            _desc: &str,
+            _root: &str,
+            _opts: &TaskOptions,
+        ) -> Result<String, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn create_subtask(
+            &self,
+            _parent: &str,
+            _title: &str,
+            _desc: &str,
+            _opts: &TaskOptions,
+        ) -> Result<String, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn assign_task(
+            &self,
+            _task_id: &str,
+            _agent: &str,
+            _by: &str,
+        ) -> Result<(), DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn get_task(&self, task_id: &str) -> Result<TaskDetail, DispatchError> {
+            Ok(TaskDetail {
+                task_id: task_id.to_string(),
+                title: "test".to_string(),
+                status: "completed".to_string(),
+                agent_id: None,
+                parent_id: None,
+                required_capabilities: vec![],
+                // Evidence absent: the gate must block advance.
+                has_code_diff: false,
+                has_verification_passed: false,
+                completion_signal: Some(CompletionSignal {
+                    status: None,
+                    should_continue: Some(true),
+                    next_action: None,
+                    summary: None,
+                    agent_id: None,
+                }),
+            })
+        }
+
+        fn check_completeness(&self, _path: &str) -> Result<CompletenessReport, DispatchError> {
+            Ok(CompletenessReport {
+                complete: true,
+                total_items: 0,
+                completed_items: 0,
+                missing: vec![],
+            })
+        }
+
+        fn import_handoff(
+            &self,
+            _path: &str,
+            _assign_to: Option<&str>,
+        ) -> Result<ImportResult, DispatchError> {
+            unimplemented!("not needed for reconcile tests")
+        }
+
+        fn cancel_task(&self, _task_id: &str) -> Result<(), DispatchError> {
+            Ok(())
+        }
+    }
+
+    // force_advance=false → EvidenceGateEvaluator governs the advance.
+    let result = reconcile_phases(instance, &ContinueButNoEvidenceMock, false)
+        .expect("reconcile should succeed");
+
+    // Phase is marked completed (Canopy signal), but the gate must block advance.
+    assert_eq!(
+        result.instance.phase_states[0].status,
+        PhaseStatus::Completed,
+        "implement phase must be Completed"
+    );
+    assert_eq!(
+        result.instance.current_phase_idx, 0,
+        "should_continue=true must NOT force advance past a failing evidence gate"
+    );
+    assert_ne!(
+        result.instance.status,
+        WorkflowStatus::Completed,
+        "a continue signal must not trigger a clean-stop Completed status"
+    );
+
+    // The outcome is the normal gate-blocked MarkedCompleted, NOT a stop.
+    assert!(
+        matches!(
+            result.outcomes[0],
+            PhaseReconcileOutcome::MarkedCompleted {
+                advanced: false,
+                ..
+            }
+        ),
+        "expected MarkedCompleted with advanced=false (gate blocked), got: {:?}",
         result.outcomes[0]
     );
 }

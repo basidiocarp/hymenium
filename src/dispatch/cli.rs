@@ -49,7 +49,6 @@ struct TaskDetailWireMirror {
 /// Centralised here so the socket path and the CLI-fallback path produce identical
 /// output rather than each having its own field mapping.
 fn map_wire_to_detail(wire: TaskDetailWireMirror) -> TaskDetail {
-    let _ = wire.completion_signal; // consumed but not yet surfaced in TaskDetail
     TaskDetail {
         task_id: wire.task.task_id,
         title: wire.task.title,
@@ -59,6 +58,13 @@ fn map_wire_to_detail(wire: TaskDetailWireMirror) -> TaskDetail {
         required_capabilities: wire.task.required_capabilities,
         has_code_diff: wire.task.has_code_diff,
         has_verification_passed: wire.task.has_verification_passed,
+        completion_signal: wire.completion_signal.and_then(|v| {
+            if v.is_null() {
+                None
+            } else {
+                serde_json::from_value(v).ok()
+            }
+        }),
     }
 }
 
@@ -690,6 +696,89 @@ mod tests {
     #[test]
     fn parse_created_task_id_preserves_raw_id_fallback() {
         assert_eq!(CliCanopyClient::parse_created_task_id("01RAW\n"), "01RAW");
+    }
+
+    // -- completion_signal wire-parse contract ----------------------------------
+    //
+    // map_wire_to_detail owns the only conversion from the opaque wire
+    // `completion_signal` Value into the typed Option<CompletionSignal>. These
+    // tests lock that contract: JSON null and parse failure both collapse to
+    // None (forward-compatible), a valid object round-trips, and the
+    // "absent should_continue -> stop" semantic is preserved through the wire.
+
+    fn wire_with_signal(signal_json: &str) -> TaskDetailWireMirror {
+        let envelope = format!(
+            r#"{{"task":{{"task_id":"01TASK","title":"t","status":"completed"}},"completion_signal":{signal_json}}}"#
+        );
+        serde_json::from_str(&envelope).expect("wire envelope should deserialize")
+    }
+
+    #[test]
+    fn map_wire_to_detail_maps_json_null_signal_to_none() {
+        let detail = map_wire_to_detail(wire_with_signal("null"));
+        assert!(
+            detail.completion_signal.is_none(),
+            "explicit JSON null must map to None, not Some(empty)"
+        );
+    }
+
+    #[test]
+    fn map_wire_to_detail_maps_absent_signal_to_none() {
+        // No completion_signal key at all -> serde default -> None.
+        let wire: TaskDetailWireMirror = serde_json::from_str(
+            r#"{"task":{"task_id":"01TASK","title":"t","status":"completed"}}"#,
+        )
+        .expect("wire without signal should deserialize");
+        let detail = map_wire_to_detail(wire);
+        assert!(detail.completion_signal.is_none());
+    }
+
+    #[test]
+    fn map_wire_to_detail_maps_malformed_signal_to_none() {
+        // should_continue is the wrong type; from_value fails and we fall back
+        // to None rather than erroring the whole task-detail parse.
+        let detail = map_wire_to_detail(wire_with_signal(r#"{"should_continue":"yes"}"#));
+        assert!(
+            detail.completion_signal.is_none(),
+            "a malformed signal must degrade to None, never abort the read"
+        );
+    }
+
+    #[test]
+    fn map_wire_to_detail_parses_should_continue_false_as_wants_stop() {
+        let detail = map_wire_to_detail(wire_with_signal(r#"{"should_continue":false}"#));
+        let signal = detail
+            .completion_signal
+            .expect("a present object signal must parse to Some");
+        assert!(signal.wants_stop(), "should_continue=false -> wants_stop");
+    }
+
+    #[test]
+    fn map_wire_to_detail_parses_should_continue_true_as_no_stop() {
+        let detail = map_wire_to_detail(wire_with_signal(
+            r#"{"should_continue":true,"next_action":{"directive":"ship it"}}"#,
+        ));
+        let signal = detail
+            .completion_signal
+            .expect("a present object signal must parse to Some");
+        assert!(
+            !signal.wants_stop(),
+            "should_continue=true -> workflow continues"
+        );
+    }
+
+    #[test]
+    fn map_wire_to_detail_empty_signal_object_wants_stop() {
+        // A present-but-empty object means should_continue is absent, which the
+        // schema defines as stop. This mirrors CompletionSignal::wants_stop.
+        let detail = map_wire_to_detail(wire_with_signal("{}"));
+        let signal = detail
+            .completion_signal
+            .expect("an empty object is still a present signal");
+        assert!(
+            signal.wants_stop(),
+            "absent should_continue (empty object) -> stop"
+        );
     }
 
     #[test]

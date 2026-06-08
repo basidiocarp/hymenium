@@ -20,6 +20,7 @@ fn make_task(has_code_diff: bool, has_verification_passed: bool) -> TaskDetail {
         required_capabilities: Vec::new(),
         has_code_diff,
         has_verification_passed,
+        completion_signal: None,
     }
 }
 

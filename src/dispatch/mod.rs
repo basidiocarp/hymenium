@@ -94,6 +94,51 @@ pub struct TaskOptions {
     pub phase_id: Option<String>,
 }
 
+/// Completion signal attached by an agent when a task is marked complete.
+///
+/// An agent can signal whether the workflow should continue past this phase
+/// and optionally provide a follow-up action (e.g., a next task ID or directive).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompletionSignal {
+    /// Opaque status code from the agent (not used by hymenium for gate logic).
+    #[serde(default)]
+    pub status: Option<String>,
+    /// If absent or false, the agent wants the workflow to stop after this phase.
+    #[serde(default)]
+    pub should_continue: Option<bool>,
+    /// Optional next action the agent recommends (follow-up task or directive).
+    #[serde(default)]
+    pub next_action: Option<NextAction>,
+    /// Optional summary from the agent.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// Optional agent identifier that emitted this signal.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+impl CompletionSignal {
+    /// Returns true if the completion signal indicates the agent wants to stop.
+    /// Absent or false should_continue means the agent wants the workflow to stop.
+    /// Note: a present-but-empty signal object (`{}`) has an absent
+    /// should_continue and therefore also requests a stop, by schema definition.
+    #[must_use]
+    pub fn wants_stop(&self) -> bool {
+        !self.should_continue.unwrap_or(false)
+    }
+}
+
+/// Recommended follow-up action after a phase completes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NextAction {
+    /// ID of a follow-up task to create or activate.
+    #[serde(default)]
+    pub follow_up_task_id: Option<String>,
+    /// Directive (e.g., "escalate", "narrow_scope", "retry") for the next phase.
+    #[serde(default)]
+    pub directive: Option<String>,
+}
+
 /// Detail record for a canopy task.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskDetail {
@@ -111,6 +156,9 @@ pub struct TaskDetail {
     /// True if verification evidence has been attached and passed.
     #[serde(default)]
     pub has_verification_passed: bool,
+    /// Optional completion signal from the agent when task is marked complete.
+    #[serde(default)]
+    pub completion_signal: Option<CompletionSignal>,
 }
 
 /// Report from a completeness check on a handoff.
@@ -206,6 +254,13 @@ pub enum PhaseReconcileOutcome {
     MarkedFailed { phase_id: String, reason: String },
     /// Phase was already in a terminal state; reconciliation was idempotent.
     AlreadyTerminal { phase_id: String },
+    /// Agent's completion signal requested workflow stop (should_continue absent/false).
+    /// The phase is now Completed but did not advance. The agent may have provided
+    /// a next_action directive.
+    StoppedByAgentSignal {
+        phase_id: String,
+        next_action: Option<NextAction>,
+    },
 }
 
 /// Result of reconciling all phases in a workflow against Canopy.
@@ -315,6 +370,22 @@ pub fn reconcile_phases(
                     "reconcile complete failed for phase {phase_id}: {e}"
                 ))
             })?;
+
+            // Honor an explicit agent stop signal: a present completion_signal whose
+            // should_continue is absent/false means the agent wants the workflow to
+            // stop cleanly. The signal can only SUPPRESS advance — it never bypasses
+            // the evidence gate.
+            if let Some(signal) = &task_detail.completion_signal {
+                if signal.wants_stop() {
+                    instance.status = WorkflowStatus::Completed;
+                    let next_action = signal.next_action.clone();
+                    outcomes.push(PhaseReconcileOutcome::StoppedByAgentSignal {
+                        phase_id: phase_id.clone(),
+                        next_action,
+                    });
+                    continue;
+                }
+            }
 
             // Attempt to advance to the next phase.
             // Use the appropriate gate evaluator based on force_advance.

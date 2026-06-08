@@ -528,6 +528,7 @@ mod tests {
             required_capabilities: vec![],
             has_code_diff: true,
             has_verification_passed: true,
+            completion_signal: None,
         };
         let evaluator = EvidenceGateEvaluator::new(task);
         let context = GateContext::new(WorkflowId("test-wf".to_string()), "audit");
@@ -557,6 +558,7 @@ mod tests {
             required_capabilities: vec![],
             has_code_diff: true,
             has_verification_passed: true,
+            completion_signal: None,
         };
         let evaluator = EvidenceGateEvaluator::new(task);
         let context = GateContext::new(WorkflowId("test-wf".to_string()), "audit");

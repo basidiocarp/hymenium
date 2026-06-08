@@ -250,6 +250,7 @@ pub(super) mod test_helpers {
             required_capabilities: Vec::new(),
             has_code_diff: false,
             has_verification_passed: false,
+            completion_signal: None,
         }
     }
 
