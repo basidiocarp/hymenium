@@ -27,7 +27,7 @@ ulid = "1"
 toml = "1"
 which = "7"
 libc = "0.2"
-sha2 = "0.10"
+sha2 = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
